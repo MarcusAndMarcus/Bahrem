@@ -1,0 +1,16 @@
+{
+  "name": "bahrem-salao",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Controle de salão, comanda e reconhecimento de prato por câmera",
+  "engines": { "node": "22.x" },
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node seed.js",
+    "test": "node testes.js",
+    "calibrar": "node calibra-forma.js"
+  },
+  "dependencies": {}
+}
