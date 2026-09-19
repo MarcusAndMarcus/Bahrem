@@ -1,0 +1,51 @@
+# Blueprint do Render — instância FREE.
+#
+# O que o free impõe, e como cada coisa foi tratada:
+#   sem disco persistente  → o banco vive num sistema de arquivos efêmero.
+#                            Por isso existe o retrato externo: a cada mudança
+#                            (e sempre no desligamento) o salao.db comprimido
+#                            sobe para um repositório PRIVADO do GitHub, e volta
+#                            de lá no arranque. Sem SNAP_REPO e SNAP_TOKEN o
+#                            sistema roda, avisa na tela que os dados são
+#                            voláteis, e perde tudo no próximo restart.
+#   hiberna em 15 min      → o primeiro acesso da noite espera ~1 min. Abra a
+#                            tela do salão alguns minutos antes de abrir a casa.
+#   750 h de instância/mês → não fique pingando para manter acordado: o mês tem
+#                            744 h e o ping consome a cota inteira. Deixe hibernar.
+#   sem shell, sem job     → a carga inicial roda sozinha no arranque (seed.js é
+#                            chamado pelo server.js). Nada a rodar na mão.
+services:
+  - type: web
+    name: bahrem-salao
+    runtime: node
+    plan: free
+    buildCommand: "echo sem dependencias"
+    startCommand: "node server.js"
+    healthCheckPath: /api/saude
+    envVars:
+      - key: NODE_VERSION
+        value: "22"                 # node:sqlite exige Node 22 ou mais novo
+      - key: CASA_NOME
+        value: Bahrem Marista
+      - key: CASA_CIDADE
+        value: GOIANIA
+      - key: SERVICO_PCT
+        value: "10"
+      - key: PIX_CHAVE              # preencher no painel; não vai no repositório
+        sync: false
+      - key: PIX_NOME
+        value: BAHREM MARISTA
+
+      # --- retrato externo: é isto que segura os dados no plano free ---
+      - key: SNAP_REPO              # ex.: MarcusAndMarcus/bahrem-dados (PRIVADO)
+        sync: false
+      - key: SNAP_TOKEN             # PAT fine-grained, só esse repo, Contents: R/W
+        sync: false
+      - key: SNAP_ARQUIVO
+        value: salao.db.gz
+      - key: SNAP_INTERVALO         # segundos entre retratos, se houver mudança
+        value: "600"
+      - key: SNAP_DEBOUNCE          # espera depois de uma mudança antes de subir
+        value: "120"
+      - key: DIAS_EVENTO            # telemetria URB1 mais velha que isso é podada
+        value: "7"
