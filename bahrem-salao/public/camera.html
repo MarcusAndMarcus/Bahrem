@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Câmera · Bahrem</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/bahrem.css">
+</head>
+<body>
+
+<header class="topo">
+  <div class="marca">Bahrem <span>Marista</span></div>
+  <div class="resumo" id="alvo"></div>
+  <div class="vaga"></div>
+  <a class="btn miudo" href="/salao">voltar ao salão</a>
+</header>
+
+<nav class="abas">
+  <a href="/salao">Salão</a>
+  <a href="/camera" class="aqui">Câmera</a>
+</nav>
+
+<main style="max-width:640px;margin:0 auto;padding:18px 16px 48px">
+
+  <div class="visor">
+    <video id="video" playsinline muted autoplay></video>
+    <canvas id="quadro" hidden></canvas>
+    <img id="foto" hidden alt="">
+    <div class="mira"><i></i></div>
+  </div>
+
+  <div class="acoes" style="grid-template-columns:1fr 1fr;margin-top:12px">
+    <button class="btn forte" id="tirar">Fotografar o prato</button>
+    <label class="btn" style="text-align:center">Escolher do rolo
+      <input type="file" id="arquivo" accept="image/*" hidden></label>
+  </div>
+
+  <div id="saida"></div>
+
+  <details style="margin-top:28px">
+    <summary style="cursor:pointer;color:var(--papel-2);font-size:14px">Gravar o padrão de um prato</summary>
+    <p class="nota">Fotografe o mesmo prato montado do jeito aprovado, no mínimo 3 vezes,
+      variando um pouco a posição e a luz. O sistema guarda a média e a folga de cada grandeza —
+      é isso que ele usa depois para reconhecer o prato.</p>
+    <div class="campo"><label for="padraoItem">Prato</label><select id="padraoItem"></select></div>
+    <div class="resumo" id="contagem">nenhuma amostra nesta sessão</div>
+    <div class="acoes" style="margin-top:10px">
+      <button class="btn" id="juntar" disabled>Juntar esta medição</button>
+      <button class="btn forte" id="gravar" disabled>Gravar padrão</button>
+    </div>
+  </details>
+</main>
+
+<script src="/app.js"></script>
+<script src="/nucleo.js"></script>
+<script>
+(function () {
+  const { $, esc, real, api } = B;
+  const q = new URLSearchParams(location.search);
+  const mesa = q.get('mesa'), comanda = q.get('comanda');
+  let fluxo = null, ultima = null, amostras = [], cardapio = [];
+
+  $('#alvo').innerHTML = mesa
+    ? `lançando na <b>mesa ${esc(mesa)}</b>`
+    : 'sem mesa escolhida — a medição não vira lançamento';
+
+  api('/api/cardapio').then(c => {
+    cardapio = c;
+    $('#padraoItem').innerHTML = c.filter(i => i.afericao)
+      .map(i => `<option value="${i.id}">${esc(i.nome)}</option>`).join('');
+  });
+
+  /* ---------- câmera ---------- */
+  async function ligarCamera() {
+    try {
+      fluxo = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }, audio: false });
+      $('#video').srcObject = fluxo;
+    } catch (e) {
+      $('#video').hidden = true;
+      mostrarAviso(`a câmera não abriu (${esc(e.name || e.message)}). Use "escolher do rolo".`);
+    }
+  }
+  ligarCamera();
+  addEventListener('pagehide', () => fluxo && fluxo.getTracks().forEach(t => t.stop()));
+
+  $('#tirar').onclick = () => {
+    const v = $('#video');
+    if (!v.videoWidth) return mostrarAviso('a câmera ainda não entregou imagem.');
+    const c = $('#quadro');
+    c.width = v.videoWidth; c.height = v.videoHeight;
+    c.getContext('2d').drawImage(v, 0, 0);
+    medir(c);
+  };
+
+  $('#arquivo').onchange = e => {
+    const f = e.target.files[0]; if (!f) return;
+    const img = $('#foto');
+    img.onload = () => { $('#video').hidden = true; img.hidden = false; medir(img); };
+    img.src = URL.createObjectURL(f);
+  };
+
+  /* ---------- medir e reconhecer ---------- */
+  async function medir(fonte) {
+    const t0 = performance.now();
+    let r;
+    try { r = Nucleo.medir(fonte); }
+    catch (e) { return mostrarAviso(`a medição parou: ${esc(e.message)}`); }
+    const ms = Math.round(performance.now() - t0);
+
+    if (r.falha) { ultima = null; atualizarBotoes(); return mostrarAviso(r.falha, ms); }
+    ultima = r;
+    atualizarBotoes();
+
+    let id;
+    try { id = await api('/api/reconhecer', { method: 'POST', corpo: { grandezas: r.m, mesa } }); }
+    catch (e) { return mostrarAviso(`medição ok, mas o servidor recusou: ${esc(e.message)}`, ms); }
+
+    desenhar(r, id, ms);
+  }
+
+  function barras(m) {
+    return `<div class="medidas">${Nucleo.CHAVES.map(k => `
+      <div class="medida"><span>${k}</span>
+        <span class="calibre"><i style="width:${(m[k] * 100).toFixed(1)}%"></i></span>
+        <span>${m[k].toFixed(3)}</span></div>`).join('')}</div>`;
+  }
+
+  function desenhar(r, id, ms) {
+    const classe = id.camada === 0 ? '' : id.camada === 1 ? 'duvida' : 'ruim';
+    const candidatos = (id.candidatos || []).map(c =>
+      `${esc(c.nome)} ${c.dm.toFixed(2)}`).join('  ·  ');
+
+    $('#saida').innerHTML = `
+      ${barras(r.m)}
+      <div class="veredito ${classe}">
+        ${esc(id.veredito)}
+        <span class="dm">medido em ${ms} ms · nitidez ${r.nitidez} · raio ${r.raioPrato}px ·
+          irregularidade ${r.irregularidade}${candidatos ? ` · candidatos: ${esc(candidatos)}` : ''}</span>
+      </div>
+      ${r.ressalvas.length ? `<p class="nota">${r.ressalvas.map(esc).join(' · ')}</p>` : ''}
+      <div id="acaoLanc"></div>`;
+
+    if (!comanda) return;
+
+    if (id.camada === 0) {
+      $('#acaoLanc').innerHTML = `<div class="acoes"><button class="btn forte" id="lanc">
+        Lançar ${esc(id.nome)} — ${real(id.preco_cent)}</button></div>`;
+      $('#lanc').onclick = () => lancar(id.item_id, id.medicao_id, $('#lanc'));
+    } else {
+      const lista = (id.candidatos && id.candidatos.length ? id.candidatos
+        : cardapio.filter(i => i.afericao).map(i => ({ item_id: i.id, nome: i.nome, preco_cent: i.preco_cent })));
+      $('#acaoLanc').innerHTML = `
+        <div class="campo" style="margin-top:14px"><label for="manual">Confirme o prato na mão</label>
+          <select id="manual">${lista.map(c => {
+            const it = cardapio.find(i => i.id === c.item_id) || {};
+            return `<option value="${c.item_id}">${esc(c.nome)} — ${real(it.preco_cent ?? c.preco_cent ?? 0)}</option>`;
+          }).join('')}</select></div>
+        <button class="btn" id="lancM">Lançar o escolhido</button>`;
+      $('#lancM').onclick = () => lancar(Number($('#manual').value), id.medicao_id, $('#lancM'));
+    }
+  }
+
+  async function lancar(itemId, medicaoId, botao) {
+    botao.disabled = true;
+    try {
+      await api(`/api/comandas/${comanda}/itens`, { method: 'POST',
+        corpo: { item_id: itemId, qtd: 1, origem: 'camera', medicao_id: medicaoId } });
+      botao.textContent = `lançado na mesa ${mesa}`;
+      setTimeout(() => location.href = '/salao', 900);
+    } catch (e) { botao.disabled = false; mostrarAviso(e.message); }
+  }
+
+  function mostrarAviso(texto, ms) {
+    $('#saida').innerHTML = `<div class="veredito ruim">${texto}
+      ${ms ? `<span class="dm">a foto foi processada em ${ms} ms — a recusa é da medição, não da rede</span>` : ''}</div>`;
+  }
+
+  /* ---------- padrões ---------- */
+  function atualizarBotoes() {
+    $('#juntar').disabled = !ultima;
+    $('#gravar').disabled = amostras.length < 3;
+    $('#contagem').textContent = amostras.length
+      ? `${amostras.length} amostra${amostras.length > 1 ? 's' : ''} juntada${amostras.length > 1 ? 's' : ''} nesta sessão`
+      : 'nenhuma amostra nesta sessão';
+  }
+  $('#juntar').onclick = () => { if (ultima) { amostras.push(ultima.m); ultima = null; atualizarBotoes(); } };
+  $('#gravar').onclick = async () => {
+    try {
+      const r = await api('/api/padroes', { method: 'POST',
+        corpo: { item_id: Number($('#padraoItem').value), amostras } });
+      amostras = []; atualizarBotoes();
+      $('#saida').innerHTML = `<div class="veredito">padrão de ${esc(r.item)} gravado com ${r.n} amostras.
+        <span class="dm">o reconhecimento passa a considerar este prato</span></div>`;
+    } catch (e) { mostrarAviso(e.message); }
+  };
+  atualizarBotoes();
+})();
+</script>
+</body>
+</html>

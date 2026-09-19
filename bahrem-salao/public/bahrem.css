@@ -1,0 +1,202 @@
+/* BAHREM · Salão — folha única.
+   Paleta lida do material do bar (noite, madeira, latão, chopp). Os hexes são
+   minha leitura, não amostras do manual de marca da casa: se vocês tiverem os
+   valores oficiais, trocar só o bloco :root abaixo muda o sistema inteiro. */
+
+:root {
+  --garrafa:  #101512;  /* fundo: vidro de garrafa contra a luz */
+  --tampo:    #17201b;  /* painéis */
+  --tampo-2:  #1e2922;
+  --risco:    #2c3a30;  /* linhas */
+  --papel:    #f2e9d8;  /* texto: papel de comanda */
+  --papel-2:  #a8a396;  /* texto secundário */
+  --latao:    #c08a2e;  /* metal: torneira, luminária */
+  --chopp:    #f0b429;  /* só o nível do copo e o número do total */
+  --brasa:    #a8342c;  /* chamada, conta pedida */
+  --folha:    #6f7a63;  /* mesa livre, planta do deck */
+
+  color-scheme: dark; /* o navegador não pinta select e input de branco por cima */
+  --r: 3px;
+  --sombra: 0 1px 0 rgba(255,255,255,.04) inset, 0 10px 24px rgba(0,0,0,.45);
+  --serif: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  background: var(--garrafa);
+  color: var(--papel);
+  font-family: var(--serif);
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body::before { /* luz fraca vindo do balcão, no canto superior */
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background: radial-gradient(120% 80% at 82% -10%, rgba(192,138,46,.16), transparent 60%);
+}
+body > * { position: relative; z-index: 1; }
+
+a { color: var(--latao); }
+button, input, select { font: inherit; color: inherit; }
+
+/* ---------- barra do topo ---------- */
+.topo {
+  display: flex; align-items: baseline; gap: 18px; flex-wrap: wrap;
+  padding: 14px 20px; border-bottom: 1px solid var(--risco);
+  background: linear-gradient(180deg, var(--tampo), transparent);
+}
+.marca { font-size: 22px; font-weight: 800; letter-spacing: -.02em; }
+.marca span { color: var(--latao); font-weight: 400; }
+.topo .vaga { flex: 1; }
+
+.resumo { display: flex; gap: 20px; flex-wrap: wrap; font-family: var(--mono); font-size: 13px; color: var(--papel-2); }
+.resumo b { color: var(--papel); font-weight: 500; }
+.resumo .grana { color: var(--chopp); }
+
+/* ---------- barramento URB1 ---------- */
+.urb1 {
+  font-family: var(--mono); font-size: 11px; color: #5f6b60;
+  padding: 6px 20px; border-bottom: 1px solid var(--risco);
+  white-space: nowrap; display: flex; gap: 16px; align-items: center;
+}
+.urb1 .quadros { flex: 1; overflow: hidden; text-overflow: ellipsis; }
+.urb1 .dados { color: #6f7a63; }
+.urb1 .dados.volatil { color: var(--brasa); }
+
+/* ---------- salão ---------- */
+.area { padding: 18px 20px 4px; }
+.area h2 { margin: 0 0 12px; font-size: 13px; font-weight: 600; color: var(--papel-2); letter-spacing: .04em; }
+.grade { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(146px, 1fr)); }
+
+.mesa {
+  position: relative; overflow: hidden; text-align: left; cursor: pointer;
+  border: 1px solid var(--risco); border-radius: var(--r); background: var(--tampo);
+  padding: 12px 12px 12px 22px; min-height: 116px; box-shadow: var(--sombra);
+  transition: border-color .12s linear;
+}
+.mesa:hover, .mesa:focus-visible { border-color: var(--latao); outline: none; }
+.mesa:focus-visible { box-shadow: 0 0 0 2px var(--latao); }
+
+/* o copo: a faixa da esquerda enche com o valor da conta */
+.copo { position: absolute; left: 0; top: 0; bottom: 0; width: 10px; background: #0c100d; border-right: 1px solid var(--risco); }
+.copo i { position: absolute; left: 0; right: 0; bottom: 0; display: block; background: linear-gradient(180deg, var(--chopp), #b07d1e); }
+.copo u { position: absolute; left: 0; right: 0; height: 5px; background: #fbf0d5; opacity: .85; } /* colarinho */
+
+.mesa .num { font-size: 34px; font-weight: 800; line-height: 1; letter-spacing: -.03em; }
+.mesa .sit { font-family: var(--mono); font-size: 11px; color: var(--papel-2); margin-top: 4px; }
+.mesa .val { font-family: var(--mono); font-size: 17px; margin-top: 10px; color: var(--chopp); }
+.mesa.livre { background: #131a15; }
+.mesa.livre .num { color: #4e5a50; font-weight: 600; }
+.mesa.livre .val { color: var(--folha); font-size: 13px; }
+.mesa.chamando { border-color: var(--brasa); }
+.mesa .sino {
+  position: absolute; right: 10px; top: 10px; width: 9px; height: 9px; border-radius: 50%;
+  background: var(--brasa); box-shadow: 0 0 0 4px rgba(168,52,44,.22);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .mesa.chamando .sino { animation: pisca 1.6s steps(2, end) infinite; }
+}
+@keyframes pisca { 50% { opacity: .25; } }
+
+/* ---------- gaveta lateral ---------- */
+.gaveta {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(440px, 100%);
+  background: var(--tampo); border-left: 1px solid var(--risco);
+  transform: translateX(101%); transition: transform .18s ease-out;
+  display: flex; flex-direction: column; z-index: 20; box-shadow: -18px 0 40px rgba(0,0,0,.5);
+}
+.gaveta.aberta { transform: none; }
+@media (prefers-reduced-motion: reduce) { .gaveta { transition: none; } }
+.gaveta header { padding: 16px 18px; border-bottom: 1px solid var(--risco); display: flex; align-items: baseline; gap: 12px; }
+.gaveta header h3 { margin: 0; font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
+.gaveta .corpo { flex: 1; overflow: auto; padding: 16px 18px; }
+.gaveta .pe { padding: 14px 18px; border-top: 1px solid var(--risco); display: grid; gap: 8px; }
+.fechar { margin-left: auto; background: none; border: 0; color: var(--papel-2); font-size: 22px; cursor: pointer; line-height: 1; }
+
+/* ---------- comanda (papel) ---------- */
+.comanda { font-family: var(--mono); font-size: 13px; line-height: 1.55; }
+.comanda .linha { display: flex; gap: 10px; border-bottom: 1px dashed var(--risco); padding: 5px 0; }
+.comanda .linha .q { width: 2.4em; color: var(--papel-2); }
+.comanda .linha .n { flex: 1; }
+.comanda .linha .v { text-align: right; white-space: nowrap; }
+.comanda .linha small { display: block; color: var(--papel-2); font-size: 11px; }
+.comanda .soma { display: flex; justify-content: space-between; padding: 4px 0; color: var(--papel-2); }
+.comanda .soma.total { color: var(--papel); font-size: 20px; border-top: 1px solid var(--risco); margin-top: 8px; padding-top: 10px; }
+.comanda .soma.total b { color: var(--chopp); font-weight: 600; }
+.vazio { color: var(--papel-2); font-family: var(--mono); font-size: 13px; padding: 24px 0; }
+
+/* ---------- botões ---------- */
+.btn {
+  border: 1px solid var(--risco); background: var(--tampo-2); color: var(--papel);
+  padding: 12px 16px; border-radius: var(--r); cursor: pointer; font-weight: 600; font-size: 15px;
+}
+.btn:hover { border-color: var(--latao); }
+.btn:focus-visible { outline: 2px solid var(--latao); outline-offset: 2px; }
+.btn.forte { background: var(--latao); border-color: var(--latao); color: #14100a; }
+.btn.perigo { border-color: var(--brasa); color: #e9b3ae; }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.btn.miudo { padding: 7px 10px; font-size: 13px; font-weight: 500; }
+
+/* ---------- formulário ---------- */
+.campo { display: grid; gap: 6px; margin-bottom: 12px; }
+.campo label { font-size: 12px; color: var(--papel-2); }
+.campo input, .campo select {
+  background: #0d1210; border: 1px solid var(--risco); border-radius: var(--r);
+  padding: 11px 12px; color: var(--papel); font-family: var(--mono);
+}
+.campo input:focus, .campo select:focus { outline: none; border-color: var(--latao); }
+
+/* ---------- página do cliente ---------- */
+.conta { max-width: 430px; margin: 0 auto; padding: 0 16px 40px; }
+.talao { background: var(--tampo); border-radius: var(--r); padding: 22px 20px 26px; margin-top: 18px; box-shadow: var(--sombra); }
+.talao::before, .talao::after { /* picote do papel */
+  content: ""; display: block; height: 8px; margin: -22px -20px 18px;
+  background: repeating-linear-gradient(90deg, var(--garrafa) 0 5px, transparent 5px 10px);
+}
+.talao::after { margin: 18px -20px -26px; }
+.talao h1 { font-size: 15px; font-weight: 600; margin: 0; letter-spacing: .02em; }
+.talao .mesaNum { font-size: 52px; font-weight: 800; line-height: .95; letter-spacing: -.04em; margin: 6px 0 2px; }
+.talao .sub { font-family: var(--mono); font-size: 12px; color: var(--papel-2); margin-bottom: 16px; }
+.rateio { font-family: var(--mono); font-size: 13px; color: var(--papel-2); margin-top: 10px; }
+.rateio b { color: var(--papel); }
+.acoes { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; margin-top: 16px; }
+.nota { font-size: 12px; color: var(--papel-2); line-height: 1.5; margin-top: 18px; }
+
+/* ---------- câmera e aferição ---------- */
+.visor { position: relative; background: #000; border: 1px solid var(--risco); border-radius: var(--r); overflow: hidden; }
+.visor video, .visor canvas, .visor img { display: block; width: 100%; height: auto; }
+.mira { position: absolute; inset: 0; pointer-events: none; }
+.mira i { position: absolute; left: 50%; top: 50%; width: 62%; aspect-ratio: 1; transform: translate(-50%, -50%);
+  border: 1px solid rgba(242,233,216,.35); border-radius: 50%; }
+.medidas { display: grid; gap: 7px; font-family: var(--mono); font-size: 12px; margin-top: 14px; }
+.medida { display: grid; grid-template-columns: 8.5em 1fr 4em; gap: 10px; align-items: center; }
+.calibre { height: 8px; background: #0c100d; border: 1px solid var(--risco); border-radius: 2px; position: relative; }
+.calibre i { position: absolute; top: 0; bottom: 0; left: 0; background: var(--latao); }
+.veredito { border-left: 3px solid var(--latao); padding: 10px 14px; margin-top: 16px; background: var(--tampo-2); font-size: 14px; line-height: 1.5; }
+.veredito.ruim { border-left-color: var(--brasa); }
+.veredito.duvida { border-left-color: var(--papel-2); }
+.veredito .dm { font-family: var(--mono); font-size: 12px; color: var(--papel-2); display: block; margin-top: 5px; }
+
+/* ---------- portaria ---------- */
+.portaria { min-height: 100dvh; display: grid; place-items: center; padding: 24px; }
+.portaria .caixa { width: min(380px, 100%); text-align: center; }
+.portaria .marca { font-size: 40px; margin-bottom: 4px; }
+.portaria p { color: var(--papel-2); font-size: 14px; margin: 0 0 26px; }
+.teclado { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 14px; }
+.teclado button { padding: 16px 0; font-size: 20px; font-weight: 600; font-family: var(--mono); }
+.pin { font-family: var(--mono); font-size: 30px; letter-spacing: .5em; min-height: 40px; color: var(--chopp); }
+.erro { color: #e9b3ae; font-size: 13px; min-height: 18px; margin-top: 8px; }
+
+.abas { display: flex; gap: 6px; padding: 0 20px; border-bottom: 1px solid var(--risco); }
+.abas a { padding: 11px 14px; text-decoration: none; color: var(--papel-2); font-size: 14px; border-bottom: 2px solid transparent; }
+.abas a.aqui { color: var(--papel); border-bottom-color: var(--latao); }
+
+@media (max-width: 560px) {
+  .grade { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+  .mesa { min-height: 100px; }
+  .mesa .num { font-size: 28px; }
+  .acoes { grid-template-columns: 1fr; }
+}
