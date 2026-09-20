@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Passe · Bahrem</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/bahrem.css">
+</head>
+<body>
+
+<header class="topo">
+  <img class="selo" src="/marca.png" alt="Bahrem">
+  <div class="marca">Passe</div>
+  <div class="resumo" id="resumo"></div>
+  <div class="vaga"></div>
+  <a class="btn miudo" href="/salao">voltar ao salão</a>
+</header>
+
+<nav class="abas">
+  <a href="/salao">Salão</a>
+  <a href="/passe" class="aqui">Passe</a>
+  <a href="/camera">Câmera</a>
+  <a href="/noite">Noite</a>
+</nav>
+
+<main class="kds" id="kds"></main>
+
+<script src="/app.js"></script>
+<script src="/alerta.js"></script>
+<script>
+(function () {
+  const { $, $$, esc, api, escutar } = B;
+  const ATRASO = { cozinha: 18 * 60000, bar: 6 * 60000 };   // a partir daqui a ficha fica vermelha
+  const TITULOS = { pendente: 'Na fila', preparo: 'Preparando', pronto: 'Pronto para levar' };
+
+  const minutos = iso => Math.floor((Date.now() - Date.parse(iso)) / 60000);
+  const relogio = iso => {
+    const m = minutos(iso);
+    return m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}` : `${m} min`;
+  };
+
+  async function carregar() {
+    let dados;
+    try { dados = await api('/api/passe'); }
+    catch (e) { $('#kds').innerHTML = `<p class="vazio">${esc(e.message)}</p>`; return; }
+    const linhas = dados.linhas || [];
+    const estacoes = [...new Set(linhas.map(l => l.estacao))].sort();
+    $('#resumo').innerHTML = `<span><b>${linhas.filter(l => l.estado !== 'pronto').length}</b> na mão</span>` +
+      `<span><b>${linhas.filter(l => l.estado === 'pronto').length}</b> esperando o garçom</span>`;
+
+    $('#kds').innerHTML = estacoes.length ? estacoes.map(est => {
+      const dela = linhas.filter(l => l.estacao === est);
+      return ['pendente', 'preparo', 'pronto'].map(estado => {
+        const fichas = dela.filter(l => l.estado === estado);
+        if (!fichas.length && estado !== 'pendente') return '';
+        return `<section class="coluna">
+          <h2>${esc(est)} · ${TITULOS[estado]} <span>${fichas.length}</span></h2>
+          ${fichas.length ? fichas.map(l => ficha(l, est)).join('')
+            : '<div class="ficha"><span class="relogio">nada aqui</span></div>'}
+        </section>`;
+      }).join('');
+    }).join('') : '<p class="vazio" style="padding:30px 20px">Nenhum item aberto no passe.</p>';
+
+    $$('#kds [data-anda]').forEach(b => b.onclick = async () => {
+      b.disabled = true;
+      try { await api(`/api/lancamentos/${b.dataset.anda}/estado`, { method: 'POST', corpo: { estado: b.dataset.para } }); }
+      catch {}
+      carregar();
+    });
+  }
+
+  function ficha(l, estacao) {
+    const velha = Date.now() - Date.parse(l.criado_em) > (ATRASO[estacao] || ATRASO.cozinha);
+    const proximo = { pendente: 'preparo', preparo: 'pronto', pronto: 'entregue' };
+    const rotulo = { pendente: 'começar', preparo: 'pronto', pronto: 'entregue ao cliente' };
+    return `<div class="ficha${velha && l.estado !== 'pronto' ? ' atrasada' : ''}">
+      <div class="alto">
+        <span class="mesa">${l.mesa}</span>
+        <span class="item">${l.qtd}× ${esc(l.nome)}</span>
+        <span class="relogio">${relogio(l.criado_em)}</span>
+      </div>
+      ${l.observacao ? `<div class="obs">${esc(l.observacao)}</div>` : ''}
+      <div class="botoes">
+        <button class="btn miudo ${l.estado === 'pronto' ? '' : 'forte'}"
+          data-anda="${l.id}" data-para="${proximo[l.estado]}">${rotulo[l.estado]}</button>
+        ${l.estado !== 'pendente' ? `<button class="btn miudo" data-anda="${l.id}"
+          data-para="${l.estado === 'preparo' ? 'pendente' : 'preparo'}">voltar</button>` : ''}
+      </div>
+    </div>`;
+  }
+
+  escutar((tipo, dado) => { if (window.Alerta) Alerta.toast(tipo, dado); carregar(); });
+  carregar();
+  setInterval(carregar, 30000);   // só para os relógios andarem
+})();
+</script>
+</body>
+</html>

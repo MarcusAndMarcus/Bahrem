@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Noite · Bahrem</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/bahrem.css">
+<style>
+.dash { max-width: 900px; margin: 0 auto; padding: 18px 20px 48px; }
+.painel { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-bottom: 20px; }
+.metrica {
+  border: 1px solid var(--risco); border-radius: var(--r); background: rgba(28,21,18,.75);
+  padding: 16px 16px 14px; backdrop-filter: blur(4px);
+}
+.metrica .rotulo { font-size: 11px; color: var(--papel-2); letter-spacing: .04em; margin: 0 0 6px; }
+.metrica .valor { font-family: var(--mono); font-size: 22px; color: var(--chopp); font-weight: 500; margin: 0; }
+.metrica .sub { font-family: var(--mono); font-size: 11px; color: var(--papel-2); margin: 4px 0 0; }
+.metrica.em-aberto .valor { color: var(--latao); }
+.metrica.chamando .valor { color: var(--brasa); }
+
+.secao { margin: 22px 0 0; }
+.secao h2 { font-size: 13px; color: var(--papel-2); letter-spacing: .04em; margin: 0 0 12px; }
+
+/* gráfico de barras em texto — cada hora é uma coluna */
+.grafico {
+  border: 1px solid var(--risco); border-radius: var(--r); background: rgba(28,21,18,.6);
+  padding: 18px 16px 14px; display: flex; gap: 6px; align-items: flex-end;
+  min-height: 120px; overflow-x: auto; scrollbar-width: none;
+}
+.grafico::-webkit-scrollbar { display: none; }
+.colGraf { display: flex; flex-direction: column; align-items: center; gap: 5px;
+  min-width: 34px; flex: 1; }
+.colGraf .barra { width: 20px; background: var(--latao); border-radius: 2px 2px 0 0;
+  min-height: 2px; transition: height .4s ease; }
+.colGraf .hora { font-family: var(--mono); font-size: 10px; color: var(--papel-2); }
+.colGraf .val { font-family: var(--mono); font-size: 9px; color: #8a7a68;
+  writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; }
+.colGraf.pico .barra { background: var(--chopp); }
+
+/* formas de pagamento */
+.formas { display: grid; gap: var(--e2); }
+.forma-linha {
+  display: grid; grid-template-columns: 6.5em 1fr 6em 3.6em; gap: var(--e3);
+  align-items: center; font-family: var(--mono); font-size: 12px;
+}
+.forma-linha .rotulo { color: var(--papel-2); text-transform: uppercase; letter-spacing: .06em; font-size: 10px; }
+.forma-linha .trilho { height: 10px; background: rgba(6,4,3,.9); border: 1px solid var(--risco);
+  border-radius: var(--r1); overflow: hidden; }
+.forma-linha .trilho i { display: block; height: 100%; transition: width .45s cubic-bezier(.22,.61,.36,1); }
+.forma-linha .cifra { text-align: right; color: var(--papel); font-variant-numeric: tabular-nums; }
+.forma-linha .fatia { text-align: right; color: var(--papel-3); font-variant-numeric: tabular-nums; }
+.forma-dinheiro i { background: var(--folha); }
+.forma-pix i { background: var(--instru); }
+.forma-credito i, .forma-debito i { background: var(--latao); }
+.forma-voucher i { background: #7a6a8a; }
+.forma-nao-informado i { background: var(--marca); }
+
+.gaveta-caixa {
+  border: 1px solid var(--risco-2); border-radius: var(--r2); padding: var(--e4);
+  background: rgba(18,16,13,.8); display: grid; gap: var(--e2); margin-top: var(--e3);
+}
+.gaveta-caixa .linha-caixa { display: flex; justify-content: space-between;
+  font-family: var(--mono); font-size: 12px; color: var(--papel-2); }
+.gaveta-caixa .linha-caixa b { color: var(--papel); font-weight: 500; font-variant-numeric: tabular-nums; }
+.gaveta-caixa .destaque { border-top: 1px solid var(--risco); padding-top: var(--e2);
+  font-size: 15px; color: var(--papel); }
+.gaveta-caixa .destaque b { color: var(--chopp); }
+.alerta-caixa { color: var(--marca); font-family: var(--mono); font-size: 11px; line-height: 1.5; }
+
+.delta { font-family: var(--mono); font-size: 11px; }
+.delta.sobe { color: var(--folha); }
+.delta.desce { color: var(--marca); }
+
+/* top itens */
+.rank { display: grid; gap: 6px; }
+.rank-item {
+  display: grid; grid-template-columns: 2em 1fr auto auto;
+  gap: 8px; align-items: center;
+  border: 1px solid var(--risco); border-radius: var(--r); padding: 9px 12px;
+  background: rgba(28,21,18,.55);
+}
+.rank-item .pos { font-family: var(--mono); font-size: 13px; color: var(--papel-2); }
+.rank-item .nome { font-size: 14px; }
+.rank-item .qtd { font-family: var(--mono); font-size: 13px; color: var(--papel-2); }
+.rank-item .total { font-family: var(--mono); font-size: 13px; color: var(--chopp); }
+.rank-item:nth-child(1) { border-color: #c08a2e; }
+.rank-item:nth-child(2), .rank-item:nth-child(3) { border-color: #4a3a2a; }
+
+.atualizacao { font-family: var(--mono); font-size: 11px; color: #6b5c48;
+  margin-top: 18px; text-align: right; }
+
+.vazio-noite { text-align: center; padding: 40px 20px; color: var(--papel-2);
+  font-family: var(--mono); font-size: 13px; }
+
+.atualizar-btn { float: right; }
+</style>
+</head>
+<body>
+
+<header class="topo">
+  <img class="selo" src="/marca.png" alt="Bahrem">
+  <div class="marca">Noite</div>
+  <div class="vaga"></div>
+  <button class="btn miudo atualizar-btn" id="atualizar">atualizar</button>
+  <a class="btn miudo" href="/salao">voltar ao salão</a>
+</header>
+
+<nav class="abas">
+  <a href="/salao">Salão</a>
+  <a href="/passe">Passe</a>
+  <a href="/noite" class="aqui">Noite</a>
+</nav>
+
+<main class="dash" id="dash">
+  <p class="vazio-noite">carregando…</p>
+</main>
+
+<script src="/app.js"></script>
+<script>
+(function () {
+  const { $, esc, real, api } = B;
+
+  function h(n) { return n < 10 ? `0${n}:00` : `${n}:00`; }
+
+  async function carregar() {
+    $('#dash').innerHTML = '<p class="vazio-noite">carregando…</p>';
+    try {
+      const d = await api('/api/noite');
+      desenhar(d);
+    } catch (e) {
+      $('#dash').innerHTML = `<p class="vazio-noite">${esc(e.message)}</p>`;
+    }
+  }
+
+  function desenhar(d) {
+    const real2 = c => real(c).replace('R$\u00a0', 'R$ ');
+    const semVendas = !d.subtotal_cent;
+
+    /* ─── métricas no topo ─── */
+    const metricas = [
+      { rotulo: 'total faturado', valor: real2(d.total_cent),
+        sub: `${real2(d.subtotal_cent)} + serviço ${real2(d.servico_cent)}`, classe: '',
+        delta: d.ontem.total_cent ? (() => {
+          const p = Math.round((d.caixa.recebido_cent - d.ontem.total_cent) / d.ontem.total_cent * 100);
+          return { p, texto: `${p >= 0 ? '+' : ''}${p}% vs. ontem (${real2(d.ontem.total_cent)})` };
+        })() : null },
+      { rotulo: 'ticket médio', valor: real2(d.ticket_cent), sub: `${d.comandas} comanda${d.comandas !== 1 ? 's' : ''}`, classe: '' },
+      { rotulo: 'cobertas na noite', valor: String(d.cobertas), sub: `${d.lancamentos} lançamentos`, classe: '' },
+      { rotulo: 'em aberto agora', valor: real2(d.agora.emAberto_cent), sub: `${d.agora.abertas} mesa${d.agora.abertas !== 1 ? 's' : ''} aberta${d.agora.abertas !== 1 ? 's' : ''}`, classe: 'em-aberto' },
+      ...(d.agora.chamadas ? [{ rotulo: 'chamando agora', valor: String(d.agora.chamadas), sub: 'mesa(s) esperando', classe: 'chamando' }] : [])
+    ];
+
+    /* ─── gráfico por hora ─── */
+    let graficoHtml = '';
+    if (d.porHora.length) {
+      const max = Math.max(...d.porHora.map(x => x.total_cent));
+      const pico = d.porHora.find(x => x.total_cent === max);
+      graficoHtml = `<section class="secao">
+        <h2>receita por hora</h2>
+        <div class="grafico">${d.porHora.map(x => `
+          <div class="colGraf${x === pico ? ' pico' : ''}">
+            <span class="val">${real2(x.total_cent)}</span>
+            <div class="barra" style="height:${Math.round(x.total_cent / max * 80)}px"></div>
+            <span class="hora">${h(x.hora)}</span>
+          </div>`).join('')}</div>
+      </section>`;
+    }
+
+    /* ─── formas de pagamento ─── */
+    let formasHtml = '';
+    if (d.porForma.length) {
+      const maxF = Math.max(...d.porForma.map(f => f.total_cent));
+      const ROT = { dinheiro: 'dinheiro', pix: 'pix', credito: 'crédito', debito: 'débito',
+        voucher: 'voucher', 'nao-informado': 'não informado' };
+      formasHtml = `<section class="secao">
+        <h2>como o dinheiro entrou</h2>
+        <div class="formas">${d.porForma.map(f => `
+          <div class="forma-linha forma-${esc(f.forma)}">
+            <span class="rotulo">${esc(ROT[f.forma] || f.forma)}</span>
+            <span class="trilho"><i style="width:${Math.round(f.total_cent / maxF * 100)}%"></i></span>
+            <span class="cifra">${real2(f.total_cent)}</span>
+            <span class="fatia">${f.fatia.toFixed(0)}%</span>
+          </div>`).join('')}</div>
+
+        <div class="gaveta-caixa">
+          <div class="linha-caixa"><span>recebido na noite</span><b>${real2(d.caixa.recebido_cent)}</b></div>
+          <div class="linha-caixa"><span>em espécie</span><b>${real2(d.caixa.dinheiro_cent)}</b></div>
+          <div class="linha-caixa"><span>eletrônico (pix, cartão, voucher)</span><b>${real2(d.caixa.eletronico_cent)}</b></div>
+          ${d.caixa.troco_cent ? `<div class="linha-caixa"><span>troco devolvido</span><b>${real2(d.caixa.troco_cent)}</b></div>` : ''}
+          ${d.caixa.fundo_cent ? `<div class="linha-caixa"><span>fundo de troco</span><b>${real2(d.caixa.fundo_cent)}</b></div>` : ''}
+          <div class="linha-caixa destaque"><span>a gaveta deve ter</span><b>${real2(d.caixa.gaveta_cent)}</b></div>
+          ${d.caixa.naoInformado_cent ? `<p class="alerta-caixa">
+            ${real2(d.caixa.naoInformado_cent)} fechou sem forma informada — esse valor entrou no
+            total mas não dá para conferir contra gaveta nem contra extrato.</p>` : ''}
+        </div>
+      </section>`;
+    }
+
+    /* ─── ranking de itens ─── */
+    let rankHtml = '';
+    if (d.topItens.length) {
+      rankHtml = `<section class="secao">
+        <h2>itens mais vendidos na noite</h2>
+        <div class="rank">${d.topItens.map((i, k) => `
+          <div class="rank-item">
+            <span class="pos">${k + 1}</span>
+            <span class="nome">${esc(i.nome)}</span>
+            <span class="qtd">${i.qtd}×</span>
+            <span class="total">${real2(i.total_cent)}</span>
+          </div>`).join('')}</div>
+      </section>`;
+    }
+
+    $('#dash').innerHTML = semVendas
+      ? '<p class="vazio-noite">Nenhuma venda registrada ainda nesta virada.</p>'
+      : `<div class="painel">${metricas.map(m =>
+          `<div class="metrica ${m.classe}"><p class="rotulo">${esc(m.rotulo)}</p>
+           <p class="valor">${esc(m.valor)}</p>
+           <p class="sub">${esc(m.sub)}</p>
+           ${m.delta ? `<p class="delta ${m.delta.p >= 0 ? 'sobe' : 'desce'}">${esc(m.delta.texto)}</p>` : ''}
+           </div>`).join('')}</div>
+        ${formasHtml}${graficoHtml}${rankHtml}
+        <p class="atualizacao">última atualização: ${new Date().toLocaleTimeString('pt-BR')} · virada de ${new Date(d.inicio).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>`;
+  }
+
+  $('#atualizar').onclick = carregar;
+  carregar();
+  setInterval(carregar, 120000);
+  addEventListener('visibilitychange', () => { if (!document.hidden) carregar(); });
+})();
+</script>
+</body>
+</html>

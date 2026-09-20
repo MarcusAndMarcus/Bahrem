@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sua conta · Bahrem</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/bahrem.css">
+</head>
+<body>
+<main class="conta">
+  <div class="talao" id="cabeca"><p class="vazio">Abrindo sua conta…</p></div>
+  <div class="abinhas" id="abas" hidden>
+    <button data-aba="conta" class="aqui">Conta</button>
+    <button data-aba="cardapio">Cardápio</button>
+    <button data-aba="dividir">Dividir</button>
+    <button data-aba="ajuda" id="abaAjuda" hidden>Perguntar</button>
+  </div>
+  <div id="painel"></div>
+</main>
+
+<script src="/app.js"></script>
+<script>
+(function () {
+  const { $, $$, esc, real, decorrido, api } = B;
+  const codigo = (new URLSearchParams(location.search).get('c') || '').toUpperCase();
+  let c = null, cardapio = [], sacola = [], aba = 'conta', conversa = [], pensando = false;
+
+  if (!codigo) {
+    $('#cabeca').innerHTML = `<img class="selo" src="/marca.png" alt="" style="margin-bottom:10px">
+      <h1>Conta da mesa</h1><p class="sub">Este link precisa do código da sua mesa.
+      Leia o QR que está na mesa ou peça o código ao garçom.</p>`;
+    return;
+  }
+
+  const ESTADOS = { sugerido: 'esperando o garçom', pendente: 'na fila', preparo: 'preparando',
+    pronto: 'pronto', entregue: 'entregue', recusado: 'não aceito' };
+
+  async function carregar(silencioso) {
+    try {
+      c = await api(`/api/conta/${encodeURIComponent(codigo)}`);
+      if (!cardapio.length) cardapio = await api('/api/cardapio');
+      $('#abas').hidden = false;
+      $('#abaAjuda').hidden = !c.assistente;
+      cabeca(); painel(silencioso);
+    } catch (e) {
+      $('#cabeca').innerHTML = `<img class="selo" src="/marca.png" alt="" style="margin-bottom:10px">
+        <h1>Conta da mesa</h1><p class="sub">${esc(e.message)}. Chame o garçom — pode ser
+        que a conta já tenha sido fechada.</p>`;
+      $('#abas').hidden = true;
+    }
+  }
+
+  function cabeca() {
+    const esperando = c.itens.filter(i => i.estado === 'sugerido').length;
+    const prontos = c.itens.filter(i => i.estado === 'pronto').length;
+    $('#cabeca').innerHTML = `
+      <img class="selo" src="/marca.png" alt="" style="margin-bottom:10px">
+      <h1>${esc(c.casa)}</h1>
+      <div class="mesaNum">${c.mesa.numero}</div>
+      <div class="sub">${esc(c.mesa.area)} · ${c.pessoas} ${c.pessoas > 1 ? 'pessoas' : 'pessoa'} ·
+        ${c.status === 'aberta' ? `aberta há ${decorrido(c.aberta_em)}` : 'conta fechada'}</div>
+      <div class="comanda" style="margin-top:4px">
+        <div class="soma total"><span>total até agora</span><b>${real(c.total_cent)}</b></div>
+      </div>
+      ${esperando ? `<div class="rateio">${esperando} ${esperando > 1 ? 'itens seus esperando' : 'item seu esperando'} o garçom aceitar</div>` : ''}
+      ${prontos ? `<div class="rateio" style="color:var(--chopp)">${prontos} ${prontos > 1 ? 'itens prontos' : 'item pronto'} saindo</div>` : ''}
+      ${c.status === 'aberta' ? `<div class="acoes">
+        <button class="btn" data-chamar="garcom">Chamar o garçom</button>
+        <button class="btn forte" data-chamar="conta">Pedir a conta</button></div>` : ''}`;
+    $$('#cabeca [data-chamar]').forEach(b => b.onclick = async () => {
+      b.disabled = true; const antes = b.textContent;
+      try {
+        await api(`/api/conta/${encodeURIComponent(codigo)}/chamar`, { method: 'POST', corpo: { tipo: b.dataset.chamar } });
+        b.textContent = b.dataset.chamar === 'conta' ? 'conta pedida' : 'garçom avisado';
+      } catch { b.textContent = antes; b.disabled = false; }
+    });
+  }
+
+  $$('#abas button').forEach(b => b.onclick = () => {
+    aba = b.dataset.aba;
+    $$('#abas button').forEach(x => x.classList.toggle('aqui', x === b));
+    painel();
+  });
+
+  function painel(silencioso) {
+    if (aba === 'conta') return telaConta();
+    if (aba === 'cardapio') return telaCardapio();
+    if (aba === 'dividir') return telaDividir();
+    if (aba === 'ajuda') return telaAjuda(silencioso);
+  }
+
+  /* ---------- conta ---------- */
+  function telaConta() {
+    const p = c.porPessoa_cent;
+    const faixa = p.length > 1 && Math.min(...p) !== Math.max(...p)
+      ? `${real(Math.min(...p))} a ${real(Math.max(...p))}` : real(p[0] || 0);
+    $('#painel').innerHTML = `<div class="talao">
+      <div class="comanda">
+        ${c.itens.length ? c.itens.map(i => `
+          <div class="linha"><span class="q">${i.qtd}×</span>
+            <span class="n">${esc(i.nome)}
+              ${i.observacao ? `<small>${esc(i.observacao)}</small>` : ''}
+              ${i.estado !== 'entregue' ? `<small><span class="selo-estado ${esc(i.estado)}">${ESTADOS[i.estado] || esc(i.estado)}</span></small>` : ''}</span>
+            <span class="v">${i.estado === 'sugerido' || i.estado === 'recusado' ? '—' : real(i.total_cent)}</span></div>`).join('')
+          : '<p class="vazio">Nada lançado ainda.</p>'}
+        <div class="soma"><span>subtotal</span><span>${real(c.subtotal_cent)}</span></div>
+        ${c.desconto_cent ? `<div class="soma"><span>desconto${c.desconto_motivo ? ` (${esc(c.desconto_motivo)})` : ''}</span><span>− ${real(c.desconto_cent)}</span></div>` : ''}
+        <div class="soma"><span>serviço ${c.servico_pct}% (opcional)</span><span>${real(c.servico_cent)}</span></div>
+        <div class="soma total"><span>total</span><b>${real(c.total_cent)}</b></div>
+      </div>
+      <div class="rateio">${c.rateado ? 'dividindo pelo que cada um marcou' : `dividindo por ${c.pessoas}`}:
+        <b>${faixa}</b>${c.rateado ? '' : ' cada'}</div>
+      <p class="nota">Os ${c.servico_pct}% de serviço são opcionais (Lei Municipal 9.418/14).
+        Esta lista atualiza sozinha a cada lançamento — confira antes de pagar e, se algo não for
+        seu, use a aba Dividir ou chame o garçom.</p></div>`;
+  }
+
+  /* ---------- cardápio e pedido ---------- */
+  function telaCardapio() {
+    if (c.status !== 'aberta') {
+      $('#painel').innerHTML = '<div class="talao"><p class="vazio">A conta já foi fechada.</p></div>';
+      return;
+    }
+    const cats = [...new Set(cardapio.map(i => i.categoria))];
+    const atual = telaCardapio.cat && cats.includes(telaCardapio.cat) ? telaCardapio.cat : cats[0];
+    $('#painel').innerHTML = `<div class="talao">
+      <div class="cats">${cats.map(k =>
+        `<button class="pilha${k === atual ? ' aqui' : ''}" data-cat="${esc(k)}">${esc(k)}</button>`).join('')}</div>
+      <div class="cardapio">${cardapio.filter(i => i.categoria === atual).map(i => `
+        <div class="prato">
+          <span class="n">${esc(i.nome)}<small>${esc(i.estacao)}</small></span>
+          <span class="v">${real(i.preco_cent)}</span>
+          <button class="btn miudo mais" data-add="${i.id}" aria-label="adicionar ${esc(i.nome)}">+</button>
+        </div>`).join('')}</div>
+      ${sacola.length ? sacolaHtml() : '<p class="nota">O que você tocar aqui vira um pedido que o garçom confirma antes de ir para a cozinha. Nada entra na conta sozinho.</p>'}
+    </div>`;
+    $$('#painel [data-cat]').forEach(b => b.onclick = () => { telaCardapio.cat = b.dataset.cat; telaCardapio(); });
+    $$('#painel [data-add]').forEach(b => b.onclick = () => {
+      const id = Number(b.dataset.add);
+      const achou = sacola.find(s => s.item_id === id);
+      achou ? achou.qtd++ : sacola.push({ item_id: id, qtd: 1 });
+      telaCardapio();
+    });
+    $$('#painel [data-menos]').forEach(b => b.onclick = () => {
+      const i = Number(b.dataset.menos);
+      sacola[i].qtd--; if (sacola[i].qtd <= 0) sacola.splice(i, 1);
+      telaCardapio();
+    });
+    const enviar = $('#enviarPedido');
+    if (enviar) enviar.onclick = async () => {
+      enviar.disabled = true;
+      const texto = ($('#obsPedido')?.value || '').trim();
+      try {
+        await api(`/api/conta/${encodeURIComponent(codigo)}/pedido`, { method: 'POST',
+          corpo: { itens: sacola.map((s, k) => ({ ...s, observacao: k === 0 ? texto : '' })) } });
+        sacola = []; aba = 'conta';
+        $$('#abas button').forEach(x => x.classList.toggle('aqui', x.dataset.aba === 'conta'));
+        await carregar();
+      } catch (e) { enviar.disabled = false; enviar.textContent = e.message; }
+    };
+  }
+
+  function sacolaHtml() {
+    const total = sacola.reduce((s, i) =>
+      s + i.qtd * (cardapio.find(x => x.id === i.item_id)?.preco_cent || 0), 0);
+    return `<div class="sacola">
+      ${sacola.map((s, k) => {
+        const it = cardapio.find(x => x.id === s.item_id);
+        return `<div class="linhaSac"><span>${s.qtd}×</span><span class="n">${esc(it.nome)}</span>
+          <span>${real(s.qtd * it.preco_cent)}</span>
+          <button class="btn miudo" data-menos="${k}" aria-label="tirar um">−</button></div>`;
+      }).join('')}
+      <div class="campo"><label for="obsPedido">Alguma observação para a cozinha?</label>
+        <input id="obsPedido" maxlength="140" placeholder="sem cebola, ponto da carne…"></div>
+      <button class="btn forte" id="enviarPedido">Mandar o pedido — ${real(total)}</button>
+      <p class="aviso-ia">O garçom confirma antes de ir para a cozinha.</p>
+    </div>`;
+  }
+
+  /* ---------- dividir ---------- */
+  function telaDividir() {
+    const valendo = c.itens.filter(i => i.estado !== 'sugerido' && i.estado !== 'recusado');
+    $('#painel').innerHTML = `<div class="talao">
+      <h1>Quem pagou o quê</h1>
+      <p class="sub">Marque quem dividiu cada item. O que ninguém marcar fica para a mesa inteira.</p>
+      ${valendo.length ? valendo.map(i => `
+        <div class="linha" style="display:block">
+          <div style="display:flex;gap:10px"><span class="q">${i.qtd}×</span>
+            <span class="n">${esc(i.nome)}</span><span class="v">${real(i.total_cent)}</span></div>
+          <div class="quem">${c.nomes.map((nome, k) => `
+            <button data-lanc="${i.id}" data-p="${k + 1}"
+              class="${i.divisao.includes(k + 1) ? 'marcado' : ''}">${esc(nome)}</button>`).join('')}
+          </div>
+        </div>`).join('') : '<p class="vazio">Nada para dividir ainda.</p>'}
+      <h1 style="margin-top:22px">Fica assim</h1>
+      ${c.nomes.map((nome, k) => `<div class="pessoa-cartao">
+        <span>${esc(nome)}</span><b>${real(c.porPessoa_cent[k])}</b></div>`).join('')}
+      <p class="nota">A soma das partes é exatamente ${real(c.total_cent)} — serviço e desconto
+        entram proporcionais ao que cada um consumiu.</p></div>`;
+
+    $$('#painel [data-lanc]').forEach(b => b.onclick = async () => {
+      const id = Number(b.dataset.lanc), p = Number(b.dataset.p);
+      const item = c.itens.find(i => i.id === id);
+      const marcados = new Set(item.divisao);
+      marcados.has(p) ? marcados.delete(p) : marcados.add(p);
+      b.classList.toggle('marcado');
+      try {
+        await api(`/api/lancamentos/${id}/divisao`, { method: 'PUT', corpo: { pessoas: [...marcados] } });
+        await carregar(true);
+      } catch { b.classList.toggle('marcado'); }
+    });
+  }
+
+  /* ---------- assistente ---------- */
+  function telaAjuda(silencioso) {
+    if (silencioso && $('#conversa')) return;
+    $('#painel').innerHTML = `<div class="talao">
+      <h1>Perguntar sobre o cardápio</h1>
+      <p class="sub">Responde sobre o que existe no cardápio e sobre a sua conta.
+        Ele sugere; quem pede é você.</p>
+      <div class="conversa" id="conversa">${conversa.map(falaHtml).join('') ||
+        `<div class="fala ela">Pergunte o que quiser sobre o cardápio ou sobre a conta desta mesa.
+          Por exemplo: o que tem de petisco para dividir em quatro?</div>`}</div>
+      <div class="perguntar">
+        <div class="campo" style="flex:1;margin:0"><input id="pergunta" maxlength="300"
+          placeholder="digite sua pergunta" ${pensando ? 'disabled' : ''}></div>
+        <button class="btn forte" id="mandar" ${pensando ? 'disabled' : ''}>Perguntar</button>
+      </div>
+      <p class="aviso-ia">As respostas vêm de um modelo de linguagem com o cardápio e a sua conta
+        na frente. Ele não fecha conta, não cancela item e não sabe de alergia — para isso,
+        chame o garçom. Se alguma resposta destoar do cardápio impresso, vale o impresso.</p></div>`;
+    $('#mandar').onclick = mandar;
+    $('#pergunta').onkeydown = e => { if (e.key === 'Enter') mandar(); };
+    ligarSugestoes();
+    const rolo = $('#conversa'); rolo.scrollTop = rolo.scrollHeight;
+  }
+
+  const falaHtml = f => `<div class="fala ${f.papel === 'cliente' ? 'eu' : 'ela'}">${esc(f.texto)}
+    ${(f.sugestoes || []).length ? `<div class="sugs">${f.sugestoes.map(id => {
+      const it = cardapio.find(x => x.id === id);
+      return it ? `<button class="btn miudo" data-sug="${id}">+ ${esc(it.nome)} — ${real(it.preco_cent)}</button>` : '';
+    }).join('')}</div>` : ''}</div>`;
+
+  function ligarSugestoes() {
+    $$('#painel [data-sug]').forEach(b => b.onclick = () => {
+      const id = Number(b.dataset.sug);
+      const achou = sacola.find(s => s.item_id === id);
+      achou ? achou.qtd++ : sacola.push({ item_id: id, qtd: 1 });
+      b.textContent = 'está na sacola — abra o Cardápio para mandar';
+      b.disabled = true;
+    });
+  }
+
+  async function mandar() {
+    const texto = ($('#pergunta').value || '').trim();
+    if (!texto || pensando) return;
+    conversa.push({ papel: 'cliente', texto });
+    pensando = true; telaAjuda();
+    $('#conversa').insertAdjacentHTML('beforeend', '<div class="fala ela pensando">pensando…</div>');
+    $('#conversa').scrollTop = 1e6;
+    try {
+      const r = await api(`/api/conta/${encodeURIComponent(codigo)}/assistente`, { method: 'POST',
+        corpo: { mensagem: texto, historico: conversa.slice(-7, -1) } });
+      conversa.push({ papel: 'assistente', texto: r.texto, sugestoes: r.sugestoes });
+    } catch (e) {
+      conversa.push({ papel: 'assistente', texto: e.message });
+    } finally {
+      pensando = false;
+      telaAjuda();
+    }
+  }
+
+  carregar();
+  setInterval(() => { if (!pensando && aba !== 'cardapio') carregar(true); }, 20000);
+  addEventListener('visibilitychange', () => { if (!document.hidden && !pensando) carregar(true); });
+})();
+</script>
+</body>
+</html>
