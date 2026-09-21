@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cardápio · Bahrem</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/bahrem.css">
+</head>
+<body>
+
+<header class="topo">
+  <img class="selo" src="/marca.png" alt="Bahrem">
+  <div class="marca">Cardápio</div>
+  <div class="resumo" id="resumo"></div>
+  <div class="vaga"></div>
+  <a class="btn miudo" href="/salao">voltar ao salão</a>
+</header>
+
+<nav class="abas">
+  <a href="/salao">Salão</a>
+  <a href="/passe">Passe</a>
+  <a href="/camera">Câmera</a>
+  <a href="/noite">Noite</a>
+  <a href="/cardapio" class="aqui">Cardápio</a>
+</nav>
+
+<div class="urb1"><span class="quadros" id="aviso">fotos reais dos pratos da casa — o cliente vê estas imagens no cardápio do celular</span></div>
+
+<main class="vitrine" id="vitrine"><p class="vazio">carregando…</p></main>
+
+<script src="/app.js"></script>
+<script src="/alerta.js"></script>
+<script>
+(function () {
+  const { $, $$, esc, real, api } = B;
+  let cardapio = [], gerente = false;
+
+  /* A foto é preparada aqui, no aparelho: recorte quadrado no centro, 720 px,
+     JPEG. Uma foto de celular de 4 MB vira ~70 KB antes de sair do tablet —
+     o wi-fi do bar agradece, e o servidor recusa acima de 350 KB. */
+  async function preparar(arquivo) {
+    const url = URL.createObjectURL(arquivo);
+    try {
+      const img = await new Promise((ok, falha) => {
+        const i = new Image();
+        i.onload = () => ok(i); i.onerror = () => falha(new Error('não consegui abrir essa imagem'));
+        i.src = url;
+      });
+      const lado = Math.min(img.naturalWidth, img.naturalHeight);
+      const sx = (img.naturalWidth - lado) / 2, sy = (img.naturalHeight - lado) / 2;
+      const alvo = Math.min(720, lado);
+      const c = document.createElement('canvas');
+      c.width = c.height = alvo;
+      const g = c.getContext('2d');
+      g.imageSmoothingQuality = 'high';
+      g.drawImage(img, sx, sy, lado, lado, 0, 0, alvo, alvo);
+      /* baixa a qualidade até caber, em vez de recusar */
+      for (const q of [0.84, 0.76, 0.68, 0.6]) {
+        const d = c.toDataURL('image/jpeg', q);
+        if (d.length * 0.75 < 330 * 1024) return d;
+      }
+      throw new Error('a foto ficou grande demais mesmo comprimida');
+    } finally { URL.revokeObjectURL(url); }
+  }
+
+  async function carregar() {
+    const [c, s] = await Promise.all([api('/api/cardapio'), api('/api/salao')]);
+    cardapio = c;
+    gerente = s.eu.papel === 'gerente';
+    const com = cardapio.filter(i => i.foto).length;
+    $('#resumo').innerHTML = `<span><b>${com}</b> de ${cardapio.length} com foto</span>`;
+    if (!gerente) $('#aviso').textContent = 'só o gerente troca foto — entre com o PIN de gerente para editar';
+    desenhar();
+  }
+
+  function desenhar() {
+    $('#vitrine').innerHTML = cardapio.map(i => `
+      <div class="vitrine-item" data-id="${i.id}">
+        <div class="quadro">${i.foto
+          ? `<img src="${esc(i.foto)}" alt="${esc(i.nome)}" loading="lazy">`
+          : '<span class="sem">sem foto</span>'}</div>
+        <div class="rotulo-v"><b>${esc(i.nome)}</b><small>${real(i.preco_cent)}</small></div>
+        ${gerente ? `<div class="botoes-v">
+          <label class="btn miudo ${i.foto ? '' : 'forte'}">${i.foto ? 'trocar' : 'fotografar'}
+            <input type="file" accept="image/*" capture="environment" hidden data-foto="${i.id}"></label>
+          ${i.foto ? `<button class="btn miudo perigo" data-tira="${i.id}">tirar</button>` : ''}
+        </div>` : ''}
+      </div>`).join('');
+
+    $$('#vitrine [data-foto]').forEach(inp => inp.onchange = async () => {
+      const arquivo = inp.files[0]; if (!arquivo) return;
+      const caixa = inp.closest('.vitrine-item');
+      caixa.style.opacity = '.55';
+      try {
+        const imagem = await preparar(arquivo);
+        const r = await api(`/api/cardapio/${inp.dataset.foto}/foto`, { method: 'PUT', corpo: { imagem } });
+        if (r.aviso) Alerta.aviso(r.aviso);
+        await carregar();
+      } catch (e) { Alerta.aviso(e.message); caixa.style.opacity = ''; }
+    });
+    $$('#vitrine [data-tira]').forEach(b => b.onclick = async () => {
+      b.disabled = true;
+      try { await api(`/api/cardapio/${b.dataset.tira}/foto`, { method: 'DELETE' }); await carregar(); }
+      catch (e) { Alerta.aviso(e.message); b.disabled = false; }
+    });
+  }
+
+  carregar().catch(e => { $('#vitrine').innerHTML = `<p class="vazio">${esc(e.message)}</p>`; });
+})();
+</script>
+</body>
+</html>

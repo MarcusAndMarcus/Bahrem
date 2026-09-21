@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Bahrem · Salão (protótipo)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400;0,600;0,800;1,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/*{{CSS}}*/
+.prototipo { font-family: var(--mono); font-size: 11px; color: #8a7a68; padding: 7px 20px;
+  border-bottom: 1px solid var(--risco); background: rgba(13,9,8,.8); }
+.prototipo b { color: var(--latao); font-weight: 500; }
+.pratos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }
+#sintetico { width: 100%; height: auto; display: block; }
+main[hidden] { display: none; }
+</style>
+</head>
+<body>
+
+<div class="prototipo"><b>protótipo</b> — roda no seu aparelho, sem servidor e sem banco.
+Recarregar volta ao estado inicial.</div>
+
+<header class="topo">
+  <img class="selo" src="/marca.png" alt="Bahrem">
+  <div class="marca">Bahrem <span>Marista</span></div>
+  <div class="resumo" id="resumo"></div>
+  <div class="vaga"></div>
+  <div class="resumo"><span>Cafú · garçom</span></div>
+</header>
+
+<nav class="abas">
+  <a href="#" data-aba="salao" class="aqui">Salão</a>
+  <a href="#" data-aba="passe">Passe</a>
+  <a href="#" data-aba="camera">Câmera</a>
+  <a href="#" data-aba="noite">Noite</a>
+  <a href="#" data-aba="cliente">Tela do cliente</a>
+</nav>
+
+<div class="pilhas" id="filtros"></div>
+
+<div class="urb1"><span class="quadros" id="urb1">URB1 — pronto</span>
+  <span class="dados" id="dados">protótipo: nada é gravado</span></div>
+
+<div id="caixinhaSalao"></div>
+<main id="salao"></main>
+<main id="passe" class="kds" hidden></main>
+
+<main id="camera" hidden style="max-width:640px;margin:0 auto;padding:18px 16px 48px">
+  <div class="visor">
+    <canvas id="sintetico"></canvas>
+    <img id="foto" hidden alt="">
+    <div class="mira"><i></i></div>
+    <div class="aovivo" id="aovivo"><span class="bolha">prato sintético no visor</span></div>
+  </div>
+
+  <div class="pratos">
+    <button class="btn miudo" data-prato="0">montar picanha</button>
+    <button class="btn miudo" data-prato="1">montar executivo</button>
+    <button class="btn miudo" data-prato="2">montar croqueta</button>
+  </div>
+
+  <div class="acoes" style="margin-top:10px">
+    <button class="btn forte" id="aferir">Aferir esta foto</button>
+    <label class="btn" style="text-align:center">Usar a câmera ou o rolo
+      <input type="file" id="arquivo" accept="image/*" capture="environment" hidden></label>
+  </div>
+
+  <div id="saida"></div>
+
+  <p class="nota">Os três botões desenham um prato sintético e mandam esses pixels pelo mesmo
+    pipeline da foto de verdade — a medição é real, o prato é que é de mentira. Quando a
+    geometria empata, a camada 2 pergunta ao modelo de visão, que aqui roda na sua conta.</p>
+</main>
+
+<main id="noite" hidden style="max-width:900px;margin:0 auto;padding:18px 20px 48px"></main>
+<main id="cliente" hidden>
+  <div id="clienteTopo"></div>
+  <div id="caixinhaMesa"></div>
+  <div id="clienteCorpo"></div>
+</main>
+
+<aside class="gaveta" id="gaveta" aria-hidden="true">
+  <header><h3 id="gTitulo">Mesa</h3><button class="fechar" id="gFechar" aria-label="fechar">×</button></header>
+  <div class="corpo" id="gCorpo"></div>
+  <div class="pe" id="gPe"></div>
+</aside>
+
+<script>/*{{NUCLEO}}*/</script>
+<script>/*{{MODULOS}}*/</script>
+<script>/*{{DEMO}}*/</script>
+</body>
+</html>
