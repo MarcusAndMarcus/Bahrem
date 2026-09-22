@@ -3,17 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Salão · Bahrem</title>
+<title>Salão · Burguer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400;0,600;0,800;1,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/bahrem.css">
+<link rel="stylesheet" href="/burguer.css">
 </head>
 <body>
 
 <header class="topo">
-  <img class="selo" src="/marca.png" alt="Bahrem">
-  <div class="marca">Bahrem <span>Marista</span></div>
+  <div class="marca">Burguer</div>
   <div class="resumo" id="resumo"></div>
   <div class="vaga"></div>
   <div class="resumo"><span id="quem"></span><button class="btn miudo" id="sair">sair</button></div>
@@ -25,6 +24,7 @@
   <a href="/camera">Câmera</a>
   <a href="/noite">Noite</a>
   <a href="/cardapio">Cardápio</a>
+  <a href="/sistema">Sistema</a>
 </nav>
 
 <div class="pilhas" id="filtros"></div>
@@ -426,6 +426,8 @@
 
   function confirmarFechamento(m, c) {
     let semServico = false, linhas = [];
+    /* nota fiscal: marcada por padrão quando a Focus está configurada */
+    let emitirNota = estado.casa.fiscal !== 'nao-fiscal', cpf = '';
     const totalCom = () => semServico
       ? c.subtotal_cent - c.desconto_cent
       : c.total_cent;
@@ -450,6 +452,17 @@
         <label style="display:flex;gap:8px;align-items:center;margin:14px 0;font-size:13px">
           <input type="checkbox" id="semServ" ${semServico ? 'checked' : ''}>
           o cliente dispensou os ${c.servico_pct}% de serviço</label>
+
+        <div class="bloco-nota">
+          <label style="display:flex;gap:8px;align-items:center;font-size:13px">
+            <input type="checkbox" id="emitirNota" ${emitirNota ? 'checked' : ''}>
+            ${estado.casa.fiscal === 'nao-fiscal' ? 'gerar comprovante (sem valor fiscal — Focus NFe não configurada)'
+              : estado.casa.fiscal === 'homologacao' ? 'emitir NFC-e (homologação — sem valor fiscal)' : 'emitir NFC-e'}</label>
+          ${emitirNota ? `<div class="campo" style="margin:10px 0 0">
+            <label for="cpfNota">CPF na nota (opcional)</label>
+            <input id="cpfNota" inputmode="numeric" maxlength="14" placeholder="000.000.000-00" value="${esc(cpf)}">
+            <span class="cpf-aviso" id="cpfAviso"></span></div>` : ''}
+        </div>
 
         <h2 style="margin:18px 0 8px;font-size:11px;letter-spacing:.12em;text-transform:uppercase;
           color:var(--papel-3);font-family:var(--mono)">Como o cliente pagou</h2>
@@ -519,6 +532,15 @@
         linhas[Number(inp.dataset.recebido)].recebido = v > 0 ? v : null;
         tela();
       });
+      $('#emitirNota').onchange = e => { emitirNota = e.target.checked; tela(); };
+      const campoCpf = $('#cpfNota');
+      if (campoCpf) campoCpf.oninput = () => {
+        cpf = campoCpf.value;
+        const d = cpf.replace(/\D/g, '');
+        const aviso = $('#cpfAviso');
+        aviso.textContent = !d ? '' : d.length < 11 ? '' : cpfValido(d) ? 'CPF válido' : 'CPF inválido';
+        aviso.className = 'cpf-aviso ' + (d.length === 11 ? (cpfValido(d) ? 'bom' : 'ruim') : '');
+      };
       $('#voltar').onclick = () => abrirGaveta(m.numero);
       $('#confirma').onclick = fechar;
     }
@@ -527,7 +549,7 @@
       $('#confirma').disabled = true;
       try {
         const r = await api(`/api/comandas/${c.comanda.id}/fechar`, { method: 'POST',
-          corpo: { semServico, pagamentos: linhas.map(l =>
+          corpo: { semServico, emitirNota, cpf: emitirNota ? cpf : '', pagamentos: linhas.map(l =>
             ({ forma: l.forma, valor_cent: l.valor, recebido_cent: l.recebido })) } });
         $('#gCorpo').innerHTML = `
           <p>Mesa ${m.numero} fechada: <b>${real(r.total_cent)}</b>.</p>
@@ -538,7 +560,9 @@
           </div>
           ${r.pix ? `<div class="campo" style="margin-top:14px"><label>Pix copia e cola</label>
               <input readonly value="${esc(r.pix)}" onclick="this.select()"></div>` : ''}
-          <p class="nota">${esc(r.aviso_pix)}</p>`;
+          <p class="nota">${esc(r.aviso_pix)}</p>
+          <div id="blocoNota"></div>`;
+        if (r.nota) mostrarNota(r.nota, c.comanda.id, c.comanda.codigo, r.avisos_nota);
         $('#gPe').innerHTML = `<button class="btn forte" id="ok">Voltar ao salão</button>`;
         $('#ok').onclick = () => { fecharGaveta(); carregar(); };
       } catch (e) {
@@ -548,6 +572,45 @@
     }
 
     tela();
+  }
+
+  /* ── a nota fiscal depois do fechamento ──
+     Se a nota falha, a conta continua fechada: o dinheiro entrou e a mesa
+     está livre. Daqui dá para tentar de novo ou consultar, sem reabrir nada. */
+  function cpfValido(d) {
+    if (!/^\d{11}$/.test(d) || /^(\d)\1{10}$/.test(d)) return false;
+    const dv = n => { let s = 0; for (let i = 0; i < n; i++) s += +d[i] * (n + 1 - i);
+      const r = (s * 10) % 11; return r === 10 ? 0 : r; };
+    return dv(9) === +d[9] && dv(10) === +d[10];
+  }
+
+  function mostrarNota(n, comandaId, codigo, avisos = []) {
+    const alvo = $('#blocoNota'); if (!alvo) return;
+    const titulo = { autorizado: 'NFC-e autorizada', erro: 'NFC-e não autorizada', pendente: 'NFC-e sem resposta',
+      'nao-fiscal': 'Comprovante sem valor fiscal', cancelado: 'NFC-e cancelada' }[n.status] || n.status;
+    const classe = n.status === 'autorizado' ? '' : n.status === 'erro' ? 'ruim' : 'duvida';
+    alvo.innerHTML = `<div class="veredito ${classe}" style="margin-top:14px">
+      <b>${esc(titulo)}${n.ambiente === 'homologacao' ? ' · homologação' : ''}</b><br>
+      ${n.status === 'autorizado' ? `nº ${esc(n.numero)} · série ${esc(n.serie)}` : esc(n.mensagem || '')}
+      ${avisos.length ? `<span class="dm">${avisos.map(esc).join(' · ')}</span>` : ''}
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px">
+        ${n.status !== 'erro' ? `<a class="qr-btn" href="/cupom?c=${encodeURIComponent(codigo)}" target="_blank" rel="noopener">abrir o cupom</a>` : ''}
+        ${n.status === 'erro' ? '<button class="btn miudo" id="notaDeNovo">tentar de novo</button>' : ''}
+        ${n.status === 'pendente' ? '<button class="btn miudo" id="notaConsultar">consultar</button>' : ''}
+      </div></div>`;
+    const deNovo = $('#notaDeNovo');
+    if (deNovo) deNovo.onclick = async () => {
+      deNovo.disabled = true;
+      try { const r = await api(`/api/comandas/${comandaId}/nfce`, { method: 'POST', corpo: {} });
+        mostrarNota(r.nota, comandaId, codigo, r.avisos); }
+      catch (e) { alerta(e.message); deNovo.disabled = false; }
+    };
+    const consultar = $('#notaConsultar');
+    if (consultar) consultar.onclick = async () => {
+      consultar.disabled = true;
+      try { const r = await api(`/api/comandas/${comandaId}/nfce`); mostrarNota(r.nota, comandaId, codigo); }
+      catch (e) { alerta(e.message); consultar.disabled = false; }
+    };
   }
 
   function alerta(msg) {
@@ -585,7 +648,7 @@
       placeholder: 'Ex.: quem espera comida há mais tempo?',
       sugestoes: sugestoesDoMomento,
       aviso: 'Lê e responde; não abre, não fecha, não lança e não dá desconto. Não estima nem projeta.',
-      recolhivel: true, chave: 'bahrem.caixinha.salao',
+      recolhivel: true, chave: 'burguer.caixinha.salao',
       enviar: async (pergunta, historico) => {
         const r = await api('/api/assistente', { method: 'POST',
           corpo: { mensagem: pergunta, historico: historico.flatMap(h => [

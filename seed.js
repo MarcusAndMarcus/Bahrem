@@ -1,7 +1,8 @@
 'use strict';
-/* Carga inicial. Os preços abaixo são de DEMONSTRAÇÃO — só a croqueta de costela
-   (R$ 64,00 / 8 un.) veio de um relato público de cliente; o resto é placeholder
-   para o sistema ter o que mostrar. Trocar pelo cardápio real antes de operar. */
+/* Carga inicial. Nomes e preços são de DEMONSTRAÇÃO, para o sistema ter o
+   que mostrar. Trocar pelo cardápio real antes de operar.
+   O cadastro fiscal (NCM, CFOP, CSOSN) não vem daqui: cada item usa um
+   exemplo por tipo e aparece como NÃO revisado até o contador conferir. */
 
 const { abrir, hashPin, agora } = require('./db');
 
@@ -16,6 +17,9 @@ const MESAS = [
 
 const CARDAPIO = [
   // nome, categoria, preco_cent, estacao, aferido pela câmera
+  ['Burguer da casa (180 g)', 'burguer', 3900, 'cozinha', 1],
+  ['Burguer duplo com cheddar', 'burguer', 4900, 'cozinha', 1],
+  ['Burguer de frango empanado', 'burguer', 3600, 'cozinha', 1],
   ['Croqueta de costela (8 un.)', 'petisco', 6400, 'cozinha', 1],
   ['Chapa de camarão', 'petisco', 12900, 'cozinha', 1],
   ['Kiev de frango com palmito', 'petisco', 7900, 'cozinha', 1],

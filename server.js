@@ -1,5 +1,5 @@
 'use strict';
-/* BAHREM · Salão — servidor único, zero dependência npm.
+/* BURGUER · Salão — servidor único, zero dependência npm.
    node:http + node:sqlite + SSE. Roda em Termux, Render ou localhost. */
 
 const http = require('node:http');
@@ -14,14 +14,15 @@ const pix = require('./pix');
 const persistencia = require('./persistencia');
 const assistente = require('./assistente');
 const conta = require('./conta');
+const fiscal = require('./fiscal');
 const { identificar, envelope } = require('./afericao');
 
 const PORTA = Number(process.env.PORT) || 3000;
 const CASA = {
-  nome: process.env.CASA_NOME || 'Bahrem Marista',
+  nome: process.env.CASA_NOME || 'Burguer',
   cidade: process.env.CASA_CIDADE || 'GOIANIA',
   pixChave: process.env.PIX_CHAVE || '',
-  pixNome: process.env.PIX_NOME || 'BAHREM MARISTA',
+  pixNome: process.env.PIX_NOME || 'BURGUER',
   servicoPct: Number(process.env.SERVICO_PCT ?? 10)
 };
 
@@ -231,8 +232,99 @@ function salao() {
       ticket_cent: abertas.length ? Math.round(abertas.reduce((s, m) => s + m.total_cent, 0) / abertas.length) : 0
     },
     casa: { nome: CASA.nome, servicoPct: CASA.servicoPct, pix: Boolean(CASA.pixChave),
-      assistente: assistente.ligado() }
+      assistente: assistente.ligado(), fiscal: fiscal.modo() }
   };
+}
+
+/* ─────────────────────────── NFC-e ───────────────────────────
+   Emitir é idempotente por comanda: se já há nota autorizada, devolve ela;
+   se a última ficou "pendente" (a rede caiu no meio), consulta antes e, se
+   precisar, reenvia com a MESMA referência — a Focus reconhece a ref e não
+   emite duas vezes. Só uma rejeição da SEFAZ abre referência nova. */
+const NOTA_PUBLICA = n => n && ({ ref: n.ref, status: n.status, ambiente: n.ambiente,
+  chave: n.chave, numero: n.numero, serie: n.serie, mensagem: n.mensagem,
+  danfe: n.danfe, qrcode: n.qrcode, consulta: n.consulta, total_cent: n.total_cent,
+  criado_em: n.criado_em, autorizada_em: n.autorizada_em, cancelada_em: n.cancelada_em });
+
+function ultimaNota(comandaId) {
+  return db.prepare('SELECT * FROM notas WHERE comanda_id=? ORDER BY id DESC LIMIT 1').get(comandaId);
+}
+
+function gravarResultado(nota, r) {
+  db.prepare(`UPDATE notas SET status=?, chave=COALESCE(?,chave), numero=COALESCE(?,numero),
+      serie=COALESCE(?,serie), mensagem=?, danfe=COALESCE(?,danfe), xml=COALESCE(?,xml),
+      qrcode=COALESCE(?,qrcode), consulta=COALESCE(?,consulta), resposta=?, atualizado_em=?,
+      autorizada_em=CASE WHEN ?='autorizado' AND autorizada_em IS NULL THEN ? ELSE autorizada_em END
+    WHERE id=?`).run(r.status === 'nao_encontrada' ? 'pendente' : r.status,
+    r.chave || null, r.numero || null, r.serie || null, r.mensagem || null, r.danfe || null,
+    r.xml || null, r.qrcode || null, r.consulta || null, JSON.stringify(r), agora(),
+    r.status, agora(), nota.id);
+  return db.prepare('SELECT * FROM notas WHERE id=?').get(nota.id);
+}
+
+async function emitirNota(comandaId, { cpf = '', por = null } = {}) {
+  const c = db.prepare('SELECT * FROM comandas WHERE id=?').get(comandaId);
+  if (!c) return { http: 404, erro: 'comanda não existe' };
+  if (c.status !== 'fechada') return { http: 409, erro: 'a nota sai depois de fechar a conta' };
+
+  let ultima = ultimaNota(comandaId);
+  if (ultima && ultima.status === 'autorizado') return { http: 200, nota: ultima, jaExistia: true };
+  if (ultima && ultima.status === 'pendente') {
+    const r = await fiscal.consultar(ultima.ref);
+    if (r.status === 'autorizado' || r.status === 'erro') {
+      ultima = gravarResultado(ultima, r);
+      if (r.status === 'autorizado') return { http: 200, nota: ultima };
+    }
+  }
+
+  const itens = db.prepare(
+    `SELECT item_id, nome, qtd, preco_cent, estacao FROM lancamentos
+      WHERE comanda_id=? AND ${NA_CONTA} ORDER BY id`).all(comandaId);
+  const cardapio = new Map(db.prepare('SELECT * FROM cardapio').all().map(i => [i.id, i]));
+  const pagamentos = db.prepare('SELECT forma, valor_cent FROM pagamentos WHERE comanda_id=? ORDER BY id')
+    .all(comandaId);
+
+  let montada;
+  try {
+    montada = fiscal.montarNota({ itens, cardapio, desconto_cent: c.desconto_cent, pagamentos, cpf });
+  } catch (e) {
+    if (e.fiscal) return { http: 400, erro: e.message };
+    throw e;
+  }
+
+  const modo = fiscal.modo();
+  if (modo === 'producao' && montada.naoRevisados.length) {
+    return { http: 409, erro: 'em produção só sai nota com cadastro fiscal revisado — faltam: ' +
+      montada.naoRevisados.join(', '), naoRevisados: montada.naoRevisados };
+  }
+
+  const reusar = ultima && ultima.status === 'pendente';
+  const tentativa = db.prepare('SELECT COUNT(*) n FROM notas WHERE comanda_id=?').get(comandaId).n + 1;
+  const ref = reusar ? ultima.ref : `burguer-${comandaId}-${tentativa}`;
+
+  if (modo === 'nao-fiscal') {
+    db.prepare(`INSERT INTO notas (comanda_id, ref, ambiente, status, mensagem, total_cent, cpf,
+        payload, criado_em, atualizado_em, por) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .run(comandaId, ref, 'nao-fiscal', 'nao-fiscal',
+        'sem FOCUS_NFE_TOKEN/FOCUS_NFE_CNPJ: comprovante SEM VALOR FISCAL, nada foi enviado à SEFAZ',
+        montada.total_cent, montada.nota.cpf_destinatario || null, JSON.stringify(montada.nota), agora(), agora(), por);
+    return { http: 200, nota: ultimaNota(comandaId), avisos: montada.avisos };
+  }
+
+  /* grava ANTES de enviar: se o processo cair no meio, fica o registro de que
+     uma nota foi para a Focus com esta referência */
+  if (!reusar) {
+    db.prepare(`INSERT INTO notas (comanda_id, ref, ambiente, status, total_cent, cpf, payload,
+        criado_em, atualizado_em, por) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+      .run(comandaId, ref, modo, 'pendente', montada.total_cent,
+        montada.nota.cpf_destinatario || null, JSON.stringify(montada.nota), agora(), agora(), por);
+  }
+  const registro = db.prepare('SELECT * FROM notas WHERE ref=?').get(ref);
+  const r = await fiscal.emitir(ref, montada.nota);
+  const nota = gravarResultado(registro, r);
+  const mesa = db.prepare('SELECT numero FROM mesas WHERE id=?').get(c.mesa_id);
+  emitir('nfce-' + nota.status, mesa.numero, { comanda_id: comandaId, ref, numero: nota.numero });
+  return { http: 200, nota, avisos: montada.avisos };
 }
 
 /* ─────────────────────────── HTTP ─────────────────────────── */
@@ -242,9 +334,9 @@ function salao() {
    igual a pedir um arquivo que não existe. */
 const PUBLICOS = new Set([
   'index.html', 'salao.html', 'mesa.html', 'passe.html', 'camera.html',
-  'noite.html', 'qr.html', 'cardapio.html',
-  'bahrem.css', 'app.js', 'nucleo.js', 'alerta.js', 'caixinha.js',
-  'casa.jpg', 'marca.png'
+  'noite.html', 'qr.html', 'cardapio.html', 'cupom.html', 'sistema.html',
+  'burguer.css', 'app.js', 'nucleo.js', 'alerta.js', 'caixinha.js',
+  'casa.jpg'
 ]);
 
 const TIPOS = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
@@ -271,7 +363,7 @@ function corpo(req, limite = 6 * 1024 * 1024) {
 /* Quando o sistema roda empacotado num arquivo só, a interface vem embutida
    aqui dentro em vez de vir do disco. É o mesmo servidor: muda a origem dos
    bytes, não a lista branca nem a rota. */
-const EMBUTIDOS = globalThis.__BAHREM_ARQUIVOS || null;
+const EMBUTIDOS = globalThis.__BURGUER_ARQUIVOS || null;
 
 function estatico(res, arquivo) {
   /* só o nome do arquivo importa: caminho com barra, .. ou subpasta não passa
@@ -341,6 +433,8 @@ const servidor = http.createServer(async (req, res) => {
     if (m === 'GET' && rota === '/noite') return estatico(res, 'noite.html');
     if (m === 'GET' && rota === '/qr') return estatico(res, 'qr.html');
     if (m === 'GET' && rota === '/cardapio') return estatico(res, 'cardapio.html');
+    if (m === 'GET' && rota === '/cupom') return estatico(res, 'cupom.html');
+    if (m === 'GET' && rota === '/sistema') return estatico(res, 'sistema.html');
     /* foto do prato: pública, porque o cliente vê o cardápio sem login.
        Só número no nome — nada de caminho, nada de extensão alternativa. */
     if (m === 'GET' && /^\/foto\/\d+\.jpg$/.test(rota)) {
@@ -365,7 +459,9 @@ const servidor = http.createServer(async (req, res) => {
     }
 
     /* ---------- fluxo do cliente (sem login, só o código da mesa) ---------- */
-    if (m === 'GET' && rota.startsWith('/api/conta/')) {
+    /* casa SÓ /api/conta/CÓDIGO — com "começa com", esta rota engolia
+       /api/conta/CÓDIGO/nota antes de a rota da nota ser alcançada */
+    if (m === 'GET' && /^\/api\/conta\/[^/]+$/.test(rota)) {
       const cod = decodeURIComponent(rota.split('/')[3] || '').toUpperCase();
       const c = db.prepare('SELECT * FROM comandas WHERE codigo = ?').get(cod);
       if (!c) return json(res, 404, { erro: 'comanda não encontrada' });
@@ -393,6 +489,23 @@ const servidor = http.createServer(async (req, res) => {
       emitir(t, mesa.numero, { comanda_id: c.id },
         urb1.telegrama('CLI', t === 'conta' ? 'CONT' : 'GARC', mesa.numero));
       return json(res, 200, { ok: true, tipo: t });
+    }
+
+    /* a nota do cliente, pelo código da comanda — é o que o cupom mostra */
+    if (m === 'GET' && /^\/api\/conta\/[^/]+\/nota$/.test(rota)) {
+      const cod = decodeURIComponent(rota.split('/')[3]).toUpperCase();
+      const c = db.prepare('SELECT * FROM comandas WHERE codigo = ?').get(cod);
+      if (!c) return json(res, 404, { erro: 'comanda não encontrada' });
+      const n = ultimaNota(c.id);
+      if (!n) return json(res, 404, { erro: 'esta conta ainda não tem nota' });
+      const mesa = db.prepare('SELECT numero FROM mesas WHERE id=?').get(c.mesa_id);
+      let payload = null;
+      try { payload = JSON.parse(n.payload || 'null'); } catch {}
+      return json(res, 200, { casa: CASA.nome, mesa: mesa.numero, nota: NOTA_PUBLICA(n),
+        itens: (payload?.items || []).map(i => ({ descricao: i.descricao, qtd: i.quantidade_comercial,
+          unitario: i.valor_unitario_comercial, total: i.valor_bruto, desconto: i.valor_desconto || 0 })),
+        pagamentos: (payload?.formas_pagamento || []).map(p => ({ codigo: p.forma_pagamento, valor: p.valor_pagamento })),
+        cpf: n.cpf ? n.cpf.replace(/^(\d{3})\d{6}(\d{2})$/, '$1.***.***-$2') : null });
     }
 
     /* o cliente monta um pedido; ele entra como sugestão e o garçom decide */
@@ -680,6 +793,9 @@ const servidor = http.createServer(async (req, res) => {
       const c = db.prepare(`SELECT * FROM comandas WHERE id=? AND status='fechada'`).get(id);
       if (!c) return json(res, 404, { erro: 'comanda não está fechada' });
       if (comandaAberta(c.mesa_id)) return json(res, 409, { erro: 'a mesa já tem outra comanda aberta' });
+      const nf = ultimaNota(id);
+      if (nf && nf.status === 'autorizado')
+        return json(res, 409, { erro: 'esta comanda tem NFC-e autorizada — cancele a nota antes de reabrir' });
       /* os pagamentos do fechamento anterior saem junto: se ficassem, a noite
          contaria o mesmo dinheiro duas vezes quando a comanda fechasse de novo */
       db.prepare('DELETE FROM pagamentos WHERE comanda_id=?').run(id);
@@ -772,12 +888,119 @@ const servidor = http.createServer(async (req, res) => {
         urb1.telegrama('SAL', 'FECH', mesa.numero, [Math.round(t.total_cent / 100)]));
       const troco = pagamentos.reduce((a, p) => a + (p.forma === 'dinheiro' && p.recebido_cent != null
         ? p.recebido_cent - p.valor_cent : 0), 0);
+
+      /* a nota sai junto com o fechamento quando pedida (ou NFCE_AUTO=1). Se a
+         nota falhar, o fechamento NÃO é desfeito: a conta foi paga, a mesa
+         está livre, e a nota pode ser reemitida pela noite ou pela gaveta. */
+      let notaFechamento = null;
+      if (b.emitirNota || process.env.NFCE_AUTO === '1') {
+        try { notaFechamento = await emitirNota(id, { cpf: b.cpf, por: s.id }); }
+        catch (e) { notaFechamento = { http: 500, erro: e.message }; }
+      }
       return json(res, 200, { total_cent: t.total_cent, subtotal_cent: t.subtotal_cent,
         servico_cent: t.servico_cent, desconto_cent: t.desconto_cent, nomes: t.nomes,
         pagamentos, troco_cent: troco,
+        nota: notaFechamento ? (notaFechamento.nota ? NOTA_PUBLICA(notaFechamento.nota) : { status: 'erro', mensagem: notaFechamento.erro })
+          : null, avisos_nota: notaFechamento?.avisos || [],
         porPessoa_cent: t.porPessoa_cent, pix: brcode,
         aviso_pix: brcode ? 'Copia-e-cola gerado. Confirme o recebimento no app do banco antes de liberar a mesa.'
           : 'PIX_CHAVE não configurada — nenhum código Pix foi gerado.' });
+    }
+
+    /* ---------- NFC-e ---------- */
+    if (m === 'POST' && /^\/api\/comandas\/\d+\/nfce$/.test(rota)) {
+      const id = Number(rota.split('/')[3]);
+      const { cpf } = await corpo(req);
+      const r = await emitirNota(id, { cpf, por: s.id });
+      if (r.erro) return json(res, r.http, { erro: r.erro, naoRevisados: r.naoRevisados });
+      return json(res, 200, { nota: NOTA_PUBLICA(r.nota), avisos: r.avisos || [], jaExistia: Boolean(r.jaExistia) });
+    }
+    if (m === 'GET' && /^\/api\/comandas\/\d+\/nfce$/.test(rota)) {
+      const id = Number(rota.split('/')[3]);
+      let n = ultimaNota(id);
+      if (n && n.status === 'pendente') n = gravarResultado(n, await fiscal.consultar(n.ref));
+      return json(res, 200, { nota: NOTA_PUBLICA(n) });
+    }
+    if (m === 'POST' && /^\/api\/nfce\/[\w-]+\/cancelar$/.test(rota)) {
+      if (s.papel !== 'gerente') return json(res, 403, { erro: 'só o gerente cancela nota fiscal' });
+      const ref = rota.split('/')[3];
+      const n = db.prepare('SELECT * FROM notas WHERE ref=?').get(ref);
+      if (!n) return json(res, 404, { erro: 'nota não existe' });
+      if (n.status !== 'autorizado') return json(res, 409, { erro: `nota ${n.status} não se cancela` });
+      const { justificativa } = await corpo(req);
+      const minutos = (Date.now() - Date.parse(n.autorizada_em || n.criado_em)) / 60000;
+      if (minutos > 30) return json(res, 409, { erro: `passaram ${Math.floor(minutos)} min — a NFC-e só se cancela em até 30 min da emissão` });
+      const r = await fiscal.cancelar(ref, justificativa);
+      if (r.status !== 'cancelado') return json(res, 422, { erro: r.mensagem });
+      db.prepare(`UPDATE notas SET status='cancelado', cancelada_em=?, justificativa=?, mensagem=?, atualizado_em=? WHERE id=?`)
+        .run(agora(), String(justificativa).trim(), r.mensagem, agora(), n.id);
+      emitir('nfce-cancelado', null, { ref });
+      return json(res, 200, { nota: NOTA_PUBLICA(db.prepare('SELECT * FROM notas WHERE id=?').get(n.id)) });
+    }
+    if (m === 'GET' && rota === '/api/notas') {
+      const desde = new URL(req.url, 'http://x').searchParams.get('desde') ||
+        new Date(Date.now() - 36 * 3600000).toISOString();
+      return json(res, 200, db.prepare(
+        `SELECT n.*, m.numero mesa, c.codigo FROM notas n JOIN comandas c ON c.id=n.comanda_id
+           JOIN mesas m ON m.id=c.mesa_id WHERE n.criado_em >= ? ORDER BY n.id DESC LIMIT 200`)
+        .all(desde).map(n => ({ ...NOTA_PUBLICA(n), mesa: n.mesa, comanda_id: n.comanda_id, codigo: n.codigo })));
+    }
+
+    /* ---------- cadastro fiscal do cardápio (gerente) ---------- */
+    if (m === 'GET' && rota === '/api/cardapio/fiscal') {
+      if (s.papel !== 'gerente') return json(res, 403, { erro: 'só o gerente vê o cadastro fiscal' });
+      return json(res, 200, db.prepare('SELECT * FROM cardapio WHERE ativo=1 ORDER BY categoria, nome').all()
+        .map(i => { const f = fiscal.fiscalDo(i); return { id: i.id, nome: i.nome, categoria: i.categoria,
+          ncm: f.ncm, cfop: f.cfop, csosn: f.csosn, origem: f.origem, unidade: f.unidade,
+          revisado: f.revisado, exemplo: f.exemplo, extra: f.extra }; }));
+    }
+    if (m === 'PUT' && /^\/api\/cardapio\/\d+\/fiscal$/.test(rota)) {
+      if (s.papel !== 'gerente') return json(res, 403, { erro: 'só o gerente edita o cadastro fiscal' });
+      const id = Number(rota.split('/')[3]);
+      if (!db.prepare('SELECT id FROM cardapio WHERE id=?').get(id)) return json(res, 404, { erro: 'item fora do cardápio' });
+      const b = await corpo(req);
+      const f = { ncm: String(b.ncm || '').replace(/\D/g, ''), cfop: String(b.cfop || '').replace(/\D/g, ''),
+        csosn: String(b.csosn || '').replace(/\D/g, ''), origem: String(b.origem ?? '0').replace(/\D/g, ''),
+        unidade: String(b.unidade || 'UN').trim().toUpperCase().slice(0, 6) };
+      const erros = fiscal.validarFiscal(f);
+      if (erros.length) return json(res, 400, { erro: erros.join('; ') });
+      let extra = null;
+      if (b.extra && typeof b.extra === 'object' && Object.keys(b.extra).length) extra = JSON.stringify(b.extra);
+      db.prepare(`UPDATE cardapio SET ncm=?, cfop=?, csosn=?, origem=?, unidade=?, fiscal_revisado=?, fiscal_extra=? WHERE id=?`)
+        .run(f.ncm, f.cfop, f.csosn, f.origem, f.unidade, b.revisado ? 1 : 0, extra, id);
+      persistencia.marcar(db);
+      return json(res, 200, { ok: true });
+    }
+
+    /* ---------- estado do sistema, com teste de verdade (gerente) ---------- */
+    if (m === 'GET' && rota === '/api/sistema') {
+      if (s.papel !== 'gerente') return json(res, 403, { erro: 'só o gerente vê o sistema' });
+      const p = persistencia.estado();
+      const naoRev = db.prepare('SELECT COUNT(*) n FROM cardapio WHERE ativo=1 AND fiscal_revisado=0').get().n;
+      return json(res, 200, {
+        ia: { ligada: assistente.ligado(), modelo: assistente.MODELO,
+          tetos: { mesa: assistente.TETO_MESA, hora: assistente.TETO_HORA } },
+        fiscal: { modo: fiscal.modo(), ambiente: fiscal.CONF.ambiente,
+          cnpj: fiscal.CONF.cnpj ? fiscal.CONF.cnpj.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5') : null,
+          itensNaoRevisados: naoRev, auto: process.env.NFCE_AUTO === '1' },
+        dados: { modo: p.modo, ultimoRetrato: p.ultimo, erro: p.erro },
+        sessao: { segredoFixo: SEGREDO_FIXO },
+        pix: { chave: Boolean(CASA.pixChave) }
+      });
+    }
+    if (m === 'POST' && rota === '/api/sistema/testar-ia') {
+      if (s.papel !== 'gerente') return json(res, 403, { erro: 'só o gerente testa o sistema' });
+      if (!assistente.ligado()) return json(res, 200, { ok: false, mensagem: 'ANTHROPIC_API_KEY não configurada' });
+      const t0 = Date.now();
+      try {
+        const txt = await assistente.chamar({ sistema: 'Responda só com a palavra: funcionando',
+          mensagens: [{ role: 'user', content: 'teste' }], maxTokens: 10 });
+        return json(res, 200, { ok: true, mensagem: `a API respondeu "${txt.slice(0, 40)}" em ${Date.now() - t0} ms`, modelo: assistente.MODELO });
+      } catch (e) { return json(res, 200, { ok: false, mensagem: e.message }); }
+    }
+    if (m === 'POST' && rota === '/api/sistema/testar-fiscal') {
+      if (s.papel !== 'gerente') return json(res, 403, { erro: 'só o gerente testa o sistema' });
+      return json(res, 200, await fiscal.testar());
     }
 
     /* ---------- aferição de prato pela câmera ---------- */
@@ -1059,7 +1282,7 @@ const servidor = http.createServer(async (req, res) => {
 
 if (require.main === module) {
   preparar().then(() => servidor.listen(PORTA, () => {
-    console.log(`BAHREM · Salão em http://localhost:${PORTA}`);
+    console.log(`BURGUER · Salão em http://localhost:${PORTA}`);
     console.log(`banco: ${ARQUIVO}`);
     if (!CASA.pixChave) console.log('PIX_CHAVE ausente — fechamento não gera copia-e-cola.');
     if (!SEGREDO_FIXO) console.log('SESSAO_SEGREDO ausente — cada restart desloga a equipe.');

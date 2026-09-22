@@ -16,7 +16,7 @@
 #                            chamado pelo server.js). Nada a rodar na mão.
 services:
   - type: web
-    name: bahrem-salao
+    name: burguer-salao
     runtime: node
     plan: free
     buildCommand: "echo sem dependencias"
@@ -26,7 +26,7 @@ services:
       - key: NODE_VERSION
         value: "22"                 # node:sqlite exige Node 22 ou mais novo
       - key: CASA_NOME
-        value: Bahrem Marista
+        value: Burguer
       - key: CASA_CIDADE
         value: GOIANIA
       - key: SERVICO_PCT
@@ -34,12 +34,26 @@ services:
       - key: PIX_CHAVE              # preencher no painel; não vai no repositório
         sync: false
       - key: PIX_NOME
-        value: BAHREM MARISTA
+        value: BURGUER
+      # --- IA: assistente do cliente, da equipe e camada 2 da câmera ---
+      - key: ANTHROPIC_API_KEY      # console.anthropic.com → API Keys (com crédito em Billing)
+        sync: false
+
+      # --- nota fiscal (NFC-e) pela Focus NFe ---
+      - key: FOCUS_NFE_TOKEN        # token da Focus; sem ele sai comprovante SEM VALOR FISCAL
+        sync: false
+      - key: FOCUS_NFE_CNPJ         # CNPJ do emitente cadastrado na Focus
+        sync: false
+      - key: FOCUS_NFE_AMBIENTE     # homologacao até o contador revisar o cadastro fiscal
+        value: homologacao
+      - key: NFCE_AUTO              # 1 = toda conta fechada emite a nota
+        value: "0"
+
       - key: SESSAO_SEGREDO         # assina as sessões; sem ele, cada restart desloga todo mundo
         generateValue: true         # no Blueprint o Render sorteia; no serviço manual, crie à mão
 
       # --- retrato externo: é isto que segura os dados no plano free ---
-      - key: SNAP_REPO              # ex.: MarcusAndMarcus/bahrem-dados (PRIVADO)
+      - key: SNAP_REPO              # ex.: MarcusAndMarcus/burguer-dados (PRIVADO)
         sync: false
       - key: SNAP_TOKEN             # PAT fine-grained, só esse repo, Contents: R/W
         sync: false

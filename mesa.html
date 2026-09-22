@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Sua conta · Bahrem</title>
+<title>Sua conta · Burguer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400;0,600;0,800;1,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/bahrem.css">
+<link rel="stylesheet" href="/burguer.css">
 </head>
 <body>
 <main>
@@ -34,7 +34,7 @@
   let c = null, cardapio = [], sacola = [], aba = 'conta', caixinha = null;
 
   if (!codigo) {
-    $('#cabeca').innerHTML = `<img class="selo" src="/marca.png" alt="" style="margin-bottom:10px">
+    $('#cabeca').innerHTML = `
       <h1>Conta da mesa</h1><p class="sub">Este link precisa do código da sua mesa.
       Leia o QR que está na mesa ou peça o código ao garçom.</p>`;
     return;
@@ -51,7 +51,7 @@
       cabeca(); painel(silencioso);
       montarCaixinha();
     } catch (e) {
-      $('#cabeca').innerHTML = `<img class="selo" src="/marca.png" alt="" style="margin-bottom:10px">
+      $('#cabeca').innerHTML = `
         <h1>Conta da mesa</h1><p class="sub">${esc(e.message)}. Chame o garçom — pode ser
         que a conta já tenha sido fechada.</p>`;
       $('#abas').hidden = true;
@@ -62,7 +62,6 @@
     const esperando = c.itens.filter(i => i.estado === 'sugerido').length;
     const prontos = c.itens.filter(i => i.estado === 'pronto').length;
     $('#cabeca').innerHTML = `
-      <img class="selo" src="/marca.png" alt="" style="margin-bottom:10px">
       <h1>${esc(c.casa)}</h1>
       <div class="mesaNum">${c.mesa.numero}</div>
       <div class="sub">${esc(c.mesa.area)} · ${c.pessoas} ${c.pessoas > 1 ? 'pessoas' : 'pessoa'} ·
@@ -117,7 +116,7 @@
       </div>
       <div class="rateio">${c.rateado ? 'dividindo pelo que cada um marcou' : `dividindo por ${c.pessoas}`}:
         <b>${faixa}</b>${c.rateado ? '' : ' cada'}</div>
-      <p class="nota">Os ${c.servico_pct}% de serviço são opcionais (Lei Municipal 9.418/14).
+      <p class="nota">Os ${c.servico_pct}% de serviço são opcionais.
         Esta lista atualiza sozinha a cada lançamento — confira antes de pagar e, se algo não for
         seu, use a aba Dividir ou chame o garçom.</p></div>`;
   }
@@ -228,7 +227,7 @@
     if (caixinha) { caixinha.mostrar(true); return; }
     caixinha = Caixinha.montar({
       alvo: '#caixinhaMesa',
-      rotulo: 'Sommelier do Bahrem',
+      rotulo: 'Sommelier do Burguer',
       titulo: 'Posso sugerir o pedido perfeito pra hoje?',
       subtitulo: 'Conte quantos são, a fome do momento ou o que estão com vontade — eu sugiro do cardápio da casa.',
       placeholder: 'Ex.: somos quatro, com fome…',

@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Noite · Bahrem</title>
+<title>Noite · Burguer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/bahrem.css">
+<link rel="stylesheet" href="/burguer.css">
 <style>
 .dash { max-width: 900px; margin: 0 auto; padding: 18px 20px 48px; }
 .painel { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-bottom: 20px; }
@@ -101,7 +101,6 @@
 <body>
 
 <header class="topo">
-  <img class="selo" src="/marca.png" alt="Bahrem">
   <div class="marca">Noite</div>
   <div class="vaga"></div>
   <button class="btn miudo atualizar-btn" id="atualizar">atualizar</button>
@@ -113,6 +112,7 @@
   <a href="/passe">Passe</a>
   <a href="/noite" class="aqui">Noite</a>
   <a href="/cardapio">Cardápio</a>
+  <a href="/sistema">Sistema</a>
 </nav>
 
 <main class="dash" id="dash">
@@ -129,14 +129,14 @@
   async function carregar() {
     $('#dash').innerHTML = '<p class="vazio-noite">carregando…</p>';
     try {
-      const d = await api('/api/noite');
-      desenhar(d);
+      const [d, notas, salao] = await Promise.all([api('/api/noite'), api('/api/notas'), api('/api/salao')]);
+      desenhar(d, notas, salao.eu.papel === 'gerente');
     } catch (e) {
       $('#dash').innerHTML = `<p class="vazio-noite">${esc(e.message)}</p>`;
     }
   }
 
-  function desenhar(d) {
+  function desenhar(d, notas = [], gerente = false) {
     const real2 = c => real(c).replace('R$\u00a0', 'R$ ');
     const semVendas = !d.subtotal_cent;
 
@@ -239,9 +239,57 @@
            <p class="sub">${esc(m.sub)}</p>
            ${m.delta ? `<p class="delta ${m.delta.p >= 0 ? 'sobe' : 'desce'}">${esc(m.delta.texto)}</p>` : ''}
            </div>`).join('')}</div>
-        ${formasHtml}${estornosHtml}${graficoHtml}${rankHtml}
+        ${formasHtml}${notasHtml(notas, gerente)}${estornosHtml}${graficoHtml}${rankHtml}
         <p class="atualizacao">última atualização: ${new Date().toLocaleTimeString('pt-BR')} · virada de ${new Date(d.inicio).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</p>`;
   }
+
+  /* ─── notas fiscais da noite ───
+     Cada nota com o seu estado. Cancelar só o gerente, só nos 30 minutos que
+     a SEFAZ permite, e sempre com justificativa escrita. */
+  const ROT_NOTA = { autorizado: 'autorizada', erro: 'rejeitada', pendente: 'sem resposta',
+    'nao-fiscal': 'sem valor fiscal', cancelado: 'cancelada' };
+  function notasHtml(notas, gerente) {
+    if (!notas.length) return '';
+    const cont = st => notas.filter(n => n.status === st).length;
+    return `<section class="secao">
+      <h2>notas fiscais — ${cont('autorizado')} autorizada(s)${cont('erro') ? ` · <span style="color:var(--marca)">${cont('erro')} rejeitada(s)</span>` : ''}${cont('pendente') ? ` · ${cont('pendente')} sem resposta` : ''}</h2>
+      <div class="rank">${notas.map(n => {
+        const podeCancelar = gerente && n.status === 'autorizado' && n.autorizada_em &&
+          Date.now() - Date.parse(n.autorizada_em) < 30 * 60000;
+        return `<div class="rank-item nota-item">
+          <span class="pos">${esc(String(n.mesa))}</span>
+          <span class="nome">${n.numero ? `nº ${esc(n.numero)}` : esc(n.ref)}
+            <span class="selo-estado ${n.status === 'autorizado' ? 'pronto' : n.status === 'erro' || n.status === 'cancelado' ? 'recusado' : 'sugerido'}">${esc(ROT_NOTA[n.status] || n.status)}</span>
+            ${n.ambiente === 'homologacao' ? '<span class="selo-estado">homologação</span>' : ''}
+            ${n.status === 'erro' ? `<br><span style="color:var(--papel-3);font-size:11px">${esc(n.mensagem || '')}</span>` : ''}</span>
+          <span class="qtd">${new Date(n.criado_em).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}</span>
+          <span class="total">${real2(n.total_cent)}</span>
+          <span class="acoes-nota">
+            ${n.status !== 'erro' ? `<a class="qr-btn" href="/cupom?c=${encodeURIComponent(n.codigo)}" target="_blank" rel="noopener">cupom</a>` : ''}
+            ${podeCancelar ? `<button class="btn miudo perigo" data-cancelar="${esc(n.ref)}">cancelar</button>` : ''}
+          </span>
+          ${podeCancelar ? `<div class="cancelar-nota" id="c-${esc(n.ref)}" hidden>
+            <input maxlength="255" placeholder="justificativa (mínimo 15 letras)">
+            <button class="btn miudo perigo" data-confirmar="${esc(n.ref)}">confirmar cancelamento</button>
+          </div>` : ''}
+        </div>`; }).join('')}</div>
+    </section>`;
+  }
+  const real2 = c => real(c).replace('R$\u00a0', 'R$ ');
+
+  document.addEventListener('click', async e => {
+    const abrir = e.target.closest('[data-cancelar]');
+    if (abrir) { const box = document.getElementById('c-' + abrir.dataset.cancelar); box.hidden = !box.hidden;
+      if (!box.hidden) box.querySelector('input').focus(); return; }
+    const conf = e.target.closest('[data-confirmar]');
+    if (!conf) return;
+    const box = document.getElementById('c-' + conf.dataset.confirmar);
+    const justificativa = box.querySelector('input').value.trim();
+    if (justificativa.length < 15) { box.querySelector('input').placeholder = 'escreva pelo menos 15 letras'; return; }
+    conf.disabled = true;
+    try { await api(`/api/nfce/${conf.dataset.confirmar}/cancelar`, { method: 'POST', corpo: { justificativa } }); carregar(); }
+    catch (err) { conf.disabled = false; conf.textContent = err.message; }
+  });
 
   $('#atualizar').onclick = carregar;
   carregar();

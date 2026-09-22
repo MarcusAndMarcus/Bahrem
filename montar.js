@@ -18,14 +18,16 @@ const paraNavegador = (arquivo, nome, prefixo = '') =>
 let html = ler('casca.html');
 /* substituição por função: sem isso, um $$ no código vira $ na saída */
 const poe = (alvo, texto) => { html = html.replace(alvo, () => texto); };
-poe('/*{{CSS}}*/', ler('bahrem.css'));
+poe('/*{{CSS}}*/', ler('burguer.css'));
 poe('/*{{NUCLEO}}*/', ler('nucleo.js') + '\n\n' + ler('caixinha.js'));
 poe('/*{{MODULOS}}*/',
   [paraNavegador('urb1.js', 'URB1'),
     paraNavegador('afericao.js', 'Afericao'),
     /* pix.js importa o CRC do urb1; no navegador ele vem do global */
     paraNavegador('pix.js', 'PIX', 'const { crc16, hex } = window.URB1;'),
-    paraNavegador('conta.js', 'Conta')
+    paraNavegador('conta.js', 'Conta'),
+    /* fiscal.js lê process.env no topo; no navegador não há process */
+    paraNavegador('fiscal.js', 'Fiscal', 'const { distribuir } = window.Conta; const process = { env: {} };')
   ].join('\n\n'));
 poe('/*{{DEMO}}*/', ler('demo.js'));
 
@@ -33,9 +35,8 @@ poe('/*{{DEMO}}*/', ler('demo.js'));
 const embutir = (arquivo, tipo) =>
   `data:${tipo};base64,${fs.readFileSync(path.join(raiz, arquivo)).toString('base64')}`;
 html = html.split('url(/casa.jpg)').join(`url(${embutir('casa.jpg', 'image/jpeg')})`);
-html = html.split('src="/marca.png"').join(`src="${embutir('marca.png', 'image/png')}"`);
 
-const destino = process.argv[2] || path.join(raiz, 'bahrem-prototipo.html');
+const destino = process.argv[2] || path.join(raiz, 'burguer-prototipo.html');
 fs.mkdirSync(path.dirname(destino), { recursive: true });
 fs.writeFileSync(destino, html);
 console.log(`${destino} — ${(Buffer.byteLength(html) / 1024).toFixed(0)} KB`);

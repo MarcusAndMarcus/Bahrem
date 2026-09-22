@@ -45,7 +45,7 @@ const cabecalho = () => ({
   authorization: `Bearer ${CONF.token}`,
   accept: 'application/vnd.github+json',
   'x-github-api-version': '2022-11-28',
-  'user-agent': 'bahrem-salao'
+  'user-agent': 'burguer-salao'
 });
 
 const alvo = () =>

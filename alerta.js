@@ -1,4 +1,4 @@
-/* BAHREM · Alertas — som (Web Audio API, zero arquivo) + toasts.
+/* BURGUER · Alertas — som (Web Audio API, zero arquivo) + toasts.
    Carregado em salao.html e passe.html. A câmera e a mesa do cliente não usam. */
 (function (w) {
   'use strict';

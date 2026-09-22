@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nota · Burguer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* O cupom é papel: fundo claro, letra de impressora térmica, 80 mm de
+   largura na impressão. Não segue o tema escuro do sistema de propósito —
+   é o documento que o cliente leva. */
+:root { --tinta: #1a1410; --tinta-2: #6b5c4a; --linha: #cfc4b3; --papel: #fbf7ef; --alerta: #b3000c; color-scheme: light; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #e9e2d4; color: var(--tinta);
+  font-family: "IBM Plex Mono", ui-monospace, Consolas, monospace; font-size: 12.5px; }
+.folha {
+  width: min(380px, 100%); margin: 18px auto 40px; background: var(--papel);
+  padding: 22px 18px 26px; box-shadow: 0 8px 26px rgba(0,0,0,.18); position: relative;
+}
+.folha::before, .folha::after { content: ""; position: absolute; left: 0; right: 0; height: 7px;
+  background: repeating-linear-gradient(90deg, #e9e2d4 0 6px, transparent 6px 12px); }
+.folha::before { top: -1px; } .folha::after { bottom: -1px; }
+h1 { font-size: 15px; text-align: center; margin: 0 0 2px; letter-spacing: .06em; }
+.centro { text-align: center; }
+.miudo { font-size: 10.5px; color: var(--tinta-2); line-height: 1.5; }
+.faixa { border: 1.5px solid var(--tinta); padding: 6px; text-align: center; font-weight: 600;
+  font-size: 11px; letter-spacing: .04em; margin: 12px 0; }
+.faixa.alerta { border-color: var(--alerta); color: var(--alerta); }
+hr { border: 0; border-top: 1px dashed var(--linha); margin: 10px 0; }
+table { width: 100%; border-collapse: collapse; }
+td { padding: 3px 0; vertical-align: top; }
+td.v { text-align: right; white-space: nowrap; padding-left: 8px; }
+.total td { font-size: 15px; font-weight: 600; padding-top: 6px; }
+.chave { word-spacing: .3em; text-align: center; font-size: 11.5px; letter-spacing: .02em; margin: 6px 0; }
+#qr { display: flex; justify-content: center; margin: 12px 0 6px; }
+#qr img, #qr canvas { width: 168px !important; height: 168px !important; }
+.botoes { display: flex; gap: 8px; justify-content: center; margin: 16px auto 0; width: min(380px, 100%); flex-wrap: wrap; }
+.botoes a, .botoes button { font: inherit; font-size: 12px; padding: 9px 14px; border: 1px solid var(--tinta);
+  background: var(--papel); color: var(--tinta); text-decoration: none; cursor: pointer; border-radius: 2px; }
+.botoes .forte { background: var(--tinta); color: var(--papel); }
+.carimbo { position: absolute; top: 38%; left: 50%; transform: translate(-50%, -50%) rotate(-18deg);
+  border: 4px solid var(--alerta); color: var(--alerta); font-size: 34px; font-weight: 600;
+  padding: 4px 16px; opacity: .78; letter-spacing: .08em; pointer-events: none; }
+@media print {
+  @page { size: 80mm auto; margin: 3mm; }
+  html, body { background: #fff; }
+  .folha { width: 100%; margin: 0; box-shadow: none; padding: 0; }
+  .folha::before, .folha::after, .botoes { display: none; }
+}
+</style>
+</head>
+<body>
+<div class="folha" id="folha"><p class="centro miudo">carregando a nota…</p></div>
+<div class="botoes" id="botoes"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"
+  integrity="sha512-CNgIRecGo7nphbeZ04Sc13ka07paqdeTu0WR1IM4kNcpmBAUSHSQX0FslNhTDadL4O5SAGapGt4FodqL8My0mA=="
+  crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+(function () {
+  'use strict';
+  const $ = s => document.querySelector(s);
+  const esc = s => String(s ?? '').replace(/[&<>"']/g,
+    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const real = v => Number(v || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+  const FORMAS = { '01': 'Dinheiro', '03': 'Cartão de crédito', '04': 'Cartão de débito',
+    '11': 'Vale-refeição', '17': 'Pix', '20': 'Pix', '99': 'Outros' };
+  const codigo = (new URLSearchParams(location.search).get('c') || '').toUpperCase();
+
+  async function carregar() {
+    if (!codigo) return falha('este link precisa do código da conta');
+    let d;
+    try {
+      const r = await fetch(`/api/conta/${encodeURIComponent(codigo)}/nota`);
+      d = await r.json();
+      if (!r.ok) return falha(d.erro || 'nota não encontrada');
+    } catch { return falha('sem conexão com o servidor'); }
+    desenhar(d);
+  }
+
+  function falha(msg) {
+    $('#folha').innerHTML = `<h1>BURGUER</h1><p class="centro miudo">${esc(msg)}</p>`;
+  }
+
+  function desenhar(d) {
+    const n = d.nota;
+    const fiscal = n.status === 'autorizado' || n.status === 'cancelado';
+    const cabecalho = n.ambiente === 'nao-fiscal'
+      ? '<div class="faixa alerta">COMPROVANTE SEM VALOR FISCAL</div>'
+      : n.ambiente === 'homologacao'
+        ? '<div class="faixa alerta">EMITIDA EM AMBIENTE DE HOMOLOGAÇÃO — SEM VALOR FISCAL</div>'
+        : '<div class="faixa">Documento Auxiliar da Nota Fiscal de Consumidor Eletrônica</div>';
+
+    const total = d.itens.reduce((a, i) => a + i.total - (i.desconto || 0), 0);
+    const desconto = d.itens.reduce((a, i) => a + (i.desconto || 0), 0);
+    const chave = n.chave ? n.chave.replace(/(\d{4})(?=\d)/g, '$1 ') : '';
+
+    $('#folha').innerHTML = `
+      ${n.status === 'cancelado' ? '<div class="carimbo">CANCELADA</div>' : ''}
+      <h1>${esc(d.casa).toUpperCase()}</h1>
+      <p class="centro miudo">mesa ${esc(d.mesa)}</p>
+      ${cabecalho}
+      <table>
+        ${d.itens.map(i => `<tr><td>${esc(i.qtd)} × ${esc(i.descricao)}<br>
+          <span class="miudo">${real(i.unitario)} un.</span></td><td class="v">${real(i.total)}</td></tr>`).join('')}
+      </table>
+      <hr>
+      <table>
+        ${desconto ? `<tr><td>Desconto</td><td class="v">− ${real(desconto)}</td></tr>` : ''}
+        <tr class="total"><td>TOTAL</td><td class="v">${real(total)}</td></tr>
+        ${d.pagamentos.map(p => `<tr><td class="miudo">${esc(FORMAS[p.codigo] || 'Pagamento')}</td>
+          <td class="v miudo">${real(p.valor)}</td></tr>`).join('')}
+      </table>
+      <p class="miudo">Taxa de serviço, quando houver, é cobrada à parte e não integra esta nota.</p>
+      <hr>
+      <p class="centro miudo">${d.cpf ? `CONSUMIDOR CPF ${esc(d.cpf)}` : 'CONSUMIDOR NÃO IDENTIFICADO'}</p>
+      ${fiscal ? `
+        <p class="centro">NFC-e nº ${esc(n.numero)} · série ${esc(n.serie)}</p>
+        <p class="centro miudo">${n.autorizada_em ? new Date(n.autorizada_em).toLocaleString('pt-BR') : ''}</p>
+        <p class="centro miudo">Consulte pela chave de acesso em<br>${esc(n.consulta || 'site da SEFAZ do seu estado')}</p>
+        <p class="chave">${esc(chave)}</p>
+        <div id="qr"></div>` : ''}
+      ${n.status === 'erro' ? `<div class="faixa alerta">A NOTA NÃO FOI AUTORIZADA<br>
+        <span class="miudo">${esc(n.mensagem)}</span></div>` : ''}
+      ${n.status === 'pendente' ? `<div class="faixa">NOTA EM PROCESSAMENTO — atualize em instantes</div>` : ''}
+      ${n.ambiente === 'nao-fiscal' ? `<p class="centro miudo">Este comprovante não substitui documento fiscal.</p>` : ''}`;
+
+    if (fiscal && n.qrcode && window.QRCode) {
+      new QRCode($('#qr'), { text: n.qrcode, width: 168, height: 168,
+        colorDark: '#1a1410', colorLight: '#fbf7ef', correctLevel: QRCode.CorrectLevel.M });
+    }
+
+    $('#botoes').innerHTML = `
+      <button class="forte" id="imprimir">Imprimir</button>
+      ${n.danfe && n.status === 'autorizado' ? `<a href="${esc(n.danfe)}" target="_blank" rel="noopener">DANFE oficial</a>` : ''}
+      ${n.status === 'pendente' ? '<button id="atualizar">Atualizar</button>' : ''}`;
+    $('#imprimir').onclick = () => print();
+    const at = $('#atualizar'); if (at) at.onclick = carregar;
+  }
+
+  carregar();
+})();
+</script>
+</body>
+</html>

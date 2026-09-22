@@ -3,16 +3,15 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Cardápio · Bahrem</title>
+<title>Cardápio · Burguer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="/bahrem.css">
+<link rel="stylesheet" href="/burguer.css">
 </head>
 <body>
 
 <header class="topo">
-  <img class="selo" src="/marca.png" alt="Bahrem">
   <div class="marca">Cardápio</div>
   <div class="resumo" id="resumo"></div>
   <div class="vaga"></div>
@@ -25,6 +24,7 @@
   <a href="/camera">Câmera</a>
   <a href="/noite">Noite</a>
   <a href="/cardapio" class="aqui">Cardápio</a>
+  <a href="/sistema">Sistema</a>
 </nav>
 
 <div class="urb1"><span class="quadros" id="aviso">fotos reais dos pratos da casa — o cliente vê estas imagens no cardápio do celular</span></div>
@@ -36,7 +36,7 @@
 <script>
 (function () {
   const { $, $$, esc, real, api } = B;
-  let cardapio = [], gerente = false;
+  let cardapio = [], gerente = false, fiscal = new Map();
 
   /* A foto é preparada aqui, no aparelho: recorte quadrado no centro, 720 px,
      JPEG. Uma foto de celular de 4 MB vira ~70 KB antes de sair do tablet —
@@ -66,12 +66,35 @@
     } finally { URL.revokeObjectURL(url); }
   }
 
+  /* O cadastro fiscal de cada item é do contador. O que vem na carga inicial
+     é exemplo, para a homologação funcionar; em produção, nota só sai com
+     todos os itens da conta marcados como revisados. */
+  function formFiscal(f) {
+    if (!f) return '';
+    return `
+      <div class="grade-fiscal">
+        <label>NCM<input name="ncm" value="${esc(f.ncm)}" inputmode="numeric" maxlength="8"></label>
+        <label>CFOP<input name="cfop" value="${esc(f.cfop)}" inputmode="numeric" maxlength="4"></label>
+        <label>CSOSN/CST<input name="csosn" value="${esc(f.csosn)}" inputmode="numeric" maxlength="3"></label>
+        <label>origem<input name="origem" value="${esc(f.origem)}" inputmode="numeric" maxlength="1"></label>
+        <label>unidade<input name="unidade" value="${esc(f.unidade)}" maxlength="6"></label>
+      </div>
+      <label class="extra-fiscal">extra (JSON do contador, ex. campos IBS/CBS)
+        <textarea name="extra" rows="2" placeholder="{}">${esc(Object.keys(f.extra || {}).length ? JSON.stringify(f.extra) : '')}</textarea></label>
+      <label style="display:flex;gap:6px;align-items:center;font-size:12px;margin:6px 0">
+        <input type="checkbox" name="revisado" ${f.revisado ? 'checked' : ''}> revisado pelo contador</label>
+      <button class="btn miudo forte" type="submit">salvar fiscal</button>`;
+  }
+
   async function carregar() {
     const [c, s] = await Promise.all([api('/api/cardapio'), api('/api/salao')]);
     cardapio = c;
     gerente = s.eu.papel === 'gerente';
+    if (gerente) fiscal = new Map((await api('/api/cardapio/fiscal')).map(f => [f.id, f]));
     const com = cardapio.filter(i => i.foto).length;
-    $('#resumo').innerHTML = `<span><b>${com}</b> de ${cardapio.length} com foto</span>`;
+    const revisados = [...fiscal.values()].filter(f => f.revisado).length;
+    $('#resumo').innerHTML = `<span><b>${com}</b> de ${cardapio.length} com foto</span>` +
+      (gerente ? `<span><b>${revisados}</b> de ${cardapio.length} com fiscal revisado</span>` : '');
     if (!gerente) $('#aviso').textContent = 'só o gerente troca foto — entre com o PIN de gerente para editar';
     desenhar();
   }
@@ -82,12 +105,16 @@
         <div class="quadro">${i.foto
           ? `<img src="${esc(i.foto)}" alt="${esc(i.nome)}" loading="lazy">`
           : '<span class="sem">sem foto</span>'}</div>
-        <div class="rotulo-v"><b>${esc(i.nome)}</b><small>${real(i.preco_cent)}</small></div>
+        <div class="rotulo-v"><b>${esc(i.nome)}</b><small>${real(i.preco_cent)}</small>
+          ${gerente && fiscal.get(i.id) ? `<span class="selo-estado ${fiscal.get(i.id).revisado ? 'pronto' : 'sugerido'}">
+            fiscal ${fiscal.get(i.id).revisado ? 'revisado' : 'de exemplo'}</span>` : ''}</div>
         ${gerente ? `<div class="botoes-v">
           <label class="btn miudo ${i.foto ? '' : 'forte'}">${i.foto ? 'trocar' : 'fotografar'}
             <input type="file" accept="image/*" capture="environment" hidden data-foto="${i.id}"></label>
           ${i.foto ? `<button class="btn miudo perigo" data-tira="${i.id}">tirar</button>` : ''}
-        </div>` : ''}
+          <button class="btn miudo" data-fiscal="${i.id}">fiscal</button>
+        </div>
+        <form class="form-fiscal" id="f-${i.id}" hidden>${formFiscal(fiscal.get(i.id))}</form>` : ''}
       </div>`).join('');
 
     $$('#vitrine [data-foto]').forEach(inp => inp.onchange = async () => {
@@ -101,6 +128,25 @@
         await carregar();
       } catch (e) { Alerta.aviso(e.message); caixa.style.opacity = ''; }
     });
+    $$('#vitrine [data-fiscal]').forEach(b => b.onclick = () => {
+      const f = $(`#f-${b.dataset.fiscal}`); f.hidden = !f.hidden;
+    });
+    $$('#vitrine .form-fiscal').forEach(f => f.onsubmit = async ev => {
+      ev.preventDefault();
+      const id = f.id.slice(2), d = new FormData(f);
+      const botao = f.querySelector('button');
+      botao.disabled = true;
+      let extra = {};
+      try { extra = d.get('extra').trim() ? JSON.parse(d.get('extra')) : {}; }
+      catch { Alerta.aviso('o campo extra precisa ser JSON válido'); botao.disabled = false; return; }
+      try {
+        await api(`/api/cardapio/${id}/fiscal`, { method: 'PUT', corpo: { ncm: d.get('ncm'), cfop: d.get('cfop'),
+          csosn: d.get('csosn'), origem: d.get('origem'), unidade: d.get('unidade'),
+          revisado: d.get('revisado') === 'on', extra } });
+        await carregar();
+      } catch (e) { Alerta.aviso(e.message); botao.disabled = false; }
+    });
+
     $$('#vitrine [data-tira]').forEach(b => b.onclick = async () => {
       b.disabled = true;
       try { await api(`/api/cardapio/${b.dataset.tira}/foto`, { method: 'DELETE' }); await carregar(); }

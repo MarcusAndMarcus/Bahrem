@@ -25,7 +25,7 @@ const ler = a => fs.readFileSync(path.join(RAIZ, a), 'utf8');
 
 /* ordem não importa para o registro (é preguiçoso), mas manter a de
    dependência ajuda quem for ler o pacote */
-const MODULOS = ['urb1.js', 'pix.js', 'afericao.js', 'conta.js', 'db.js',
+const MODULOS = ['urb1.js', 'pix.js', 'afericao.js', 'conta.js', 'fiscal.js', 'db.js',
   'seed.js', 'persistencia.js', 'assistente.js', 'server.js'];
 
 const INTERFACE = {
@@ -37,13 +37,15 @@ const INTERFACE = {
   'noite.html': 'text/html; charset=utf-8',
   'qr.html': 'text/html; charset=utf-8',
   'cardapio.html': 'text/html; charset=utf-8',
-  'bahrem.css': 'text/css; charset=utf-8',
+  'cupom.html': 'text/html; charset=utf-8',
+  'sistema.html': 'text/html; charset=utf-8',
+  'burguer.css': 'text/css; charset=utf-8',
   'app.js': 'text/javascript; charset=utf-8',
   'nucleo.js': 'text/javascript; charset=utf-8',
   'alerta.js': 'text/javascript; charset=utf-8',
   'caixinha.js': 'text/javascript; charset=utf-8'
 };
-const IMAGENS = { 'casa.jpg': 'image/jpeg', 'marca.png': 'image/png' };
+const IMAGENS = { 'casa.jpg': 'image/jpeg' };
 
 /* JSON.stringify não escapa </script> nem U+2028/2029; num arquivo .js isso é
    inofensivo, mas escapo mesmo assim para o pacote poder ser colado em
@@ -71,7 +73,7 @@ function montar() {
   return `#!/usr/bin/env node
 'use strict';
 /* ══════════════════════════════════════════════════════════════════════════
-   BAHREM · Salão — pacote de arquivo único.
+   BURGUER · Salão — pacote de arquivo único.
 
    GERADO por empacotar.js a partir dos módulos separados. Não edite aqui:
    a próxima geração apaga a mudança. O código-fonte são os arquivos soltos.
@@ -84,7 +86,7 @@ function montar() {
    ══════════════════════════════════════════════════════════════════════════ */
 
 /* a interface, servida da memória */
-globalThis.__BAHREM_ARQUIVOS = {
+globalThis.__BURGUER_ARQUIVOS = {
 ${arquivos.join(',\n')}
 };
 
@@ -115,7 +117,7 @@ if (require.main === module) {
   servidor.preparar().then(() => {
     const porta = Number(process.env.PORT) || 3000;
     servidor.servidor.listen(porta, () => {
-      console.log(\`BAHREM · Salão (pacote único) em http://localhost:\${porta}\`);
+      console.log(\`BURGUER · Salão (pacote único) em http://localhost:\${porta}\`);
     });
   }).catch(e => { console.error('não subiu:', e.message); process.exit(1); });
 }
@@ -125,7 +127,7 @@ module.exports = servidor;
 }
 
 if (require.main === module) {
-  const destino = process.argv[2] || path.join(RAIZ, 'bahrem-pacote.js');
+  const destino = process.argv[2] || path.join(RAIZ, 'burguer-pacote.js');
   const saida = montar();
   fs.mkdirSync(path.dirname(destino), { recursive: true });
   fs.writeFileSync(destino, saida);

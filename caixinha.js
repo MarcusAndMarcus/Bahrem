@@ -17,7 +17,7 @@
        placeholder: 'Ex.: quem pediu a conta?',
        sugestoes: ['…'] ou () => ['…'],      // função = sugestões que mudam com o salão
        aviso: 'texto miúdo de rodapé',
-       recolhivel: true, chave: 'bahrem.cx.salao',   // lembra se estava recolhida
+       recolhivel: true, chave: 'burguer.cx.salao',   // lembra se estava recolhida
        enviar: async (pergunta, historico) => ({ texto, extras: [{ rotulo, acao }] })
      });
 */

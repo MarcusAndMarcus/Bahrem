@@ -26,7 +26,7 @@ async function abrir(base, rota, token) {
   const dom = await JSDOM.fromURL(base + rota, { runScripts: 'dangerously', resources: new SoLocal(),
     pretendToBeVisual: true, virtualConsole: vc,
     beforeParse(w) {
-      if (token) w.localStorage.setItem('bahrem.token', token);
+      if (token) w.localStorage.setItem('burguer.token', token);
       w.fetch = (u, o) => fetch(new URL(u, base), o);           // jsdom não traz fetch
       w.EventSource = class { constructor() {} addEventListener() {} close() {} };
       w.onerror = m => erros.push(`${rota}: ${m}`);
@@ -69,6 +69,24 @@ async function abrir(base, rota, token) {
     if (ds.activeElement !== ds.querySelector('#caixinhaSalao input')) throw new Error('foco não foi');
   });
 
+  await passo('salão real: o fechamento oferece a nota e explica o modo fiscal', async () => {
+    const cab = { 'content-type': 'application/json', authorization: `Bearer ${entra.token}` };
+    const card = await (await fetch(base + '/api/cardapio')).json();
+    const burg = card.find(i => /Burguer da casa/.test(i.nome));
+    await fetch(`${base}/api/comandas/${abre.comanda_id}/itens`, { method: 'POST', headers: cab,
+      body: JSON.stringify({ item_id: burg.id, qtd: 2 }) });
+    const s2 = await abrir(base, '/salao', entra.token);
+    const d2 = s2.window.document;
+    const sete = [...d2.querySelectorAll('#salao .mesa')].find(x => x.dataset.n === '7');
+    sete.dispatchEvent(new s2.window.MouseEvent('click', { bubbles: true }));
+    await espera(400);
+    d2.querySelector('#fechar').dispatchEvent(new s2.window.MouseEvent('click', { bubbles: true }));
+    await espera(100);
+    const bloco = d2.querySelector('.bloco-nota');
+    if (!bloco) throw new Error('sem o bloco da nota no fechamento');
+    if (!/sem valor fiscal/i.test(bloco.textContent)) throw new Error('não explicou o modo: ' + bloco.textContent.trim());
+  });
+
   const m = await abrir(base, `/mesa?c=${abre.codigo}`, null);
   const dm = m.window.document;
   await passo('cliente real: conta, depois o sommelier, depois as abas', () => {
@@ -85,7 +103,35 @@ async function abrir(base, rota, token) {
     if (!dm.querySelector('#painel .prato .foto')) throw new Error('sem moldura');
   });
 
+  await passo('cupom real: comprovante sem valor fiscal, com itens e total', async () => {
+    const cab = { 'content-type': 'application/json', authorization: `Bearer ${entra.token}` };
+    const conta = await (await fetch(`${base}/api/comandas/${abre.comanda_id}`, { headers: cab })).json();
+    const f = await (await fetch(`${base}/api/comandas/${abre.comanda_id}/fechar`, { method: 'POST', headers: cab,
+      body: JSON.stringify({ emitirNota: true, pagamentos: [{ forma: 'pix', valor_cent: conta.total_cent }] }) })).json();
+    if (!f.nota || f.nota.status !== 'nao-fiscal') throw new Error('nota: ' + JSON.stringify(f.nota || f));
+    const cp = await abrir(base, `/cupom?c=${abre.codigo}`, null);
+    const dc = cp.window.document;
+    const faixa = dc.querySelector('.faixa.alerta');
+    if (!faixa || !/SEM VALOR FISCAL/.test(faixa.textContent)) throw new Error('sem a faixa de sem valor fiscal');
+    if (!dc.querySelector('.folha table tr')) throw new Error('sem itens');
+    if (!/TOTAL/.test(dc.querySelector('.total').textContent)) throw new Error('sem total');
+  });
+
+  const sis = await abrir(base, '/sistema', entra.token);
+  await passo('sistema real: quatro painéis, e o fiscal diz que está sem valor fiscal', () => {
+    const ds = sis.window.document;
+    const paineis = ds.querySelectorAll('.painel');
+    if (paineis.length !== 4) throw new Error(`${paineis.length} painéis`);
+    if (!/sem valor fiscal/.test(paineis[1].textContent)) throw new Error('modo fiscal não informado');
+    if (!ds.querySelector('[data-testar="ia"]')) throw new Error('sem o botão de testar a IA');
+  });
+
   const c = await abrir(base, '/cardapio', entra.token);
+  await passo('cardápio real: o gerente vê o cadastro fiscal de cada item', () => {
+    const dcard = c.window.document;
+    if (!dcard.querySelector('.form-fiscal input[name="ncm"]')) throw new Error('sem o formulário fiscal');
+    if (!/de exemplo/.test(dcard.querySelector('.vitrine-item .selo-estado').textContent)) throw new Error('sem o selo fiscal');
+  });
   await passo('cardápio real: vitrine do gerente com botão de fotografar', () => {
     const itens = c.window.document.querySelectorAll('.vitrine-item');
     if (itens.length < 10) throw new Error(`${itens.length} itens`);

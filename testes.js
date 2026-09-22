@@ -3,14 +3,14 @@
    Roda em banco temporário — não toca no banco do salão. */
 
 process.env.DB_PATH = require('node:path').join(require('node:os').tmpdir(),
-  `bahrem-teste-${Date.now()}.db`);
-process.env.PIX_CHAVE = process.env.PIX_CHAVE || 'bahrem@exemplo.com.br';
+  `burguer-teste-${Date.now()}.db`);
+process.env.PIX_CHAVE = process.env.PIX_CHAVE || 'burguer@exemplo.com.br';
 
 /* o retrato externo é testado contra um dublê da API do GitHub, subido aqui
    mesmo. Isso prova o contrato que escrevi, NÃO prova que o GitHub responde
    igual — isso só um token de verdade prova. */
 const PORTA_DUBLE = Number(process.env.PORTA_DUBLE || 8899);
-process.env.SNAP_REPO = 'MarcusAndMarcus/bahrem-dados';
+process.env.SNAP_REPO = 'MarcusAndMarcus/burguer-dados';
 process.env.SNAP_TOKEN = 'token-de-teste';
 process.env.SNAP_API = `http://127.0.0.1:${PORTA_DUBLE}`;
 process.env.SNAP_ARQUIVO = 'salao.db.gz';
@@ -25,6 +25,14 @@ process.env.ANTHROPIC_API_KEY = 'chave-de-teste';
 process.env.ANTHROPIC_API_URL = `http://127.0.0.1:${PORTA_IA}/v1/messages`;
 process.env.IA_TETO_MESA = '6';
 process.env.SESSAO_SEGREDO = 'segredo-de-teste-que-nao-vale-em-producao';
+
+/* a Focus NFe também por dublê, seguindo o contrato da documentação dela
+   (abril de 2026). Prova o meu cliente — não prova a SEFAZ. */
+const PORTA_FOCUS = Number(process.env.PORTA_FOCUS || 8897);
+process.env.FOCUS_NFE_TOKEN = 'token-focus-de-teste';
+process.env.FOCUS_NFE_CNPJ = '12.345.678/0001-95';
+process.env.FOCUS_NFE_URL = `http://127.0.0.1:${PORTA_FOCUS}`;
+process.env.FOCUS_NFE_AMBIENTE = 'homologacao';
 
 const assert = require('node:assert');
 let ok = 0, falhas = [];
@@ -60,12 +68,12 @@ t('valor acima de 0xFFFF satura em vez de estourar', () => {
 const pix = require('./pix');
 console.log('\nPix BR Code');
 t('o código gerado passa no próprio CRC', () => {
-  const c = pix.brcode({ chave: 'bahrem@exemplo.com.br', valor: 123.45,
-    nome: 'Bahrem Marista', cidade: 'Goiânia', txid: 'A1B2C3D4' });
+  const c = pix.brcode({ chave: 'burguer@exemplo.com.br', valor: 123.45,
+    nome: 'Burguer', cidade: 'Goiânia', txid: 'A1B2C3D4' });
   assert.strictEqual(urb1.crc16(c.slice(0, -4)).toString(16).toUpperCase().padStart(4, '0'), c.slice(-4));
 });
 t('TLV bate: cada campo declara o tamanho certo', () => {
-  const c = pix.brcode({ chave: 'x@y.com', valor: 10, nome: 'Bahrem', cidade: 'Goiania', txid: 'T1' });
+  const c = pix.brcode({ chave: 'x@y.com', valor: 10, nome: 'Burguer', cidade: 'Goiania', txid: 'T1' });
   let i = 0;
   while (i < c.length) {
     const tam = Number(c.slice(i + 2, i + 4));
@@ -75,12 +83,12 @@ t('TLV bate: cada campo declara o tamanho certo', () => {
   assert.strictEqual(i, c.length, 'os campos não fecham o comprimento total');
 });
 t('valor entra com 2 casas e acento some do nome', () => {
-  const c = pix.brcode({ chave: 'x@y.com', valor: 7.5, nome: 'Bahrém Açaí', cidade: 'Goiânia' });
+  const c = pix.brcode({ chave: 'x@y.com', valor: 7.5, nome: 'Búrguer Açaí', cidade: 'Goiânia' });
   assert.ok(c.includes('54047.50'), 'valor');
-  assert.ok(c.includes('BAHREM ACAI'), 'nome sem acento');
+  assert.ok(c.includes('BURGUER ACAI'), 'nome sem acento');
 });
 t('sem valor, o QR sai livre (sem campo 54)', () => {
-  const c = pix.brcode({ chave: 'x@y.com', valor: 0, nome: 'Bahrem', cidade: 'Goiania' });
+  const c = pix.brcode({ chave: 'x@y.com', valor: 0, nome: 'Burguer', cidade: 'Goiania' });
   assert.ok(!/(^|[0-9])5404/.test(c.slice(0, 80)), 'não deveria ter campo de valor');
 });
 
@@ -201,6 +209,92 @@ t('mesa de uma pessoa não quebra o rateio', () => {
   const r = contaMod.calcular({ itens: itensBase, pessoas: 1, servicoPct: 10 });
   assert.strictEqual(r.porPessoa_cent.length, 1);
   assert.strictEqual(r.porPessoa_cent[0], r.total_cent);
+});
+
+/* ───────── 4c. NFC-e: montagem da nota ───────── */
+const fiscal = require('./fiscal');
+console.log('\nNFC-e (montagem)');
+const cardFiscal = new Map([
+  [1, { id: 1, nome: 'Burguer da casa', estacao: 'cozinha' }],
+  [2, { id: 2, nome: 'Chopp Pilsen 300ml', estacao: 'bar' }]
+]);
+const itensNota = [
+  { item_id: 1, nome: 'Burguer da casa', qtd: 1, preco_cent: 3900 },
+  { item_id: 2, nome: 'Chopp Pilsen 300ml', qtd: 2, preco_cent: 1500 },
+  { item_id: 2, nome: 'Chopp Pilsen 300ml', qtd: 1, preco_cent: 1500 }
+];
+t('itens iguais viram uma linha, e os valores batem', () => {
+  const { nota, total_cent } = fiscal.montarNota({ itens: itensNota, cardapio: cardFiscal,
+    pagamentos: [{ forma: 'pix', valor_cent: 9240 }] });
+  assert.strictEqual(nota.items.length, 2);
+  assert.strictEqual(nota.items[1].quantidade_comercial, 3);
+  assert.strictEqual(total_cent, 8400);
+  assert.strictEqual(nota.items.reduce((a, i) => a + Math.round(i.valor_bruto * 100), 0), 8400);
+});
+t('o serviço fica fora e o pagamento entra proporcional, fechando no centavo', () => {
+  /* conta de 84,00 + 10% = 92,40, paga metade em pix e metade em dinheiro */
+  const { nota } = fiscal.montarNota({ itens: itensNota, cardapio: cardFiscal,
+    pagamentos: [{ forma: 'pix', valor_cent: 4620 }, { forma: 'dinheiro', valor_cent: 4620 }] });
+  const soma = nota.formas_pagamento.reduce((a, f) => a + Math.round(f.valor_pagamento * 100), 0);
+  assert.strictEqual(soma, 8400, 'o pagamento declarado não bate com o total da nota');
+});
+t('Pix estático é 20, cartão vai como maquininha avulsa', () => {
+  const { nota } = fiscal.montarNota({ itens: itensNota, cardapio: cardFiscal,
+    pagamentos: [{ forma: 'pix', valor_cent: 3000 }, { forma: 'credito', valor_cent: 3000 },
+      { forma: 'debito', valor_cent: 3240 }] });
+  const cod = nota.formas_pagamento.map(f => f.forma_pagamento);
+  assert.deepStrictEqual(cod, ['20', '03', '04']);
+  assert.strictEqual(nota.formas_pagamento[1].tipo_integracao, '2');
+  assert.strictEqual(nota.formas_pagamento[0].tipo_integracao, undefined);
+});
+t('desconto rateado entre os itens soma exatamente o desconto', () => {
+  const { nota, total_cent } = fiscal.montarNota({ itens: itensNota, cardapio: cardFiscal,
+    desconto_cent: 1001, pagamentos: [{ forma: 'dinheiro', valor_cent: 8000 }] });
+  const desc = nota.items.reduce((a, i) => a + Math.round((i.valor_desconto || 0) * 100), 0);
+  assert.strictEqual(desc, 1001);
+  assert.strictEqual(total_cent, 8400 - 1001);
+});
+t('fechamento sem forma de pagamento não vira nota', () => {
+  assert.throws(() => fiscal.montarNota({ itens: itensNota, cardapio: cardFiscal,
+    pagamentos: [{ forma: 'nao-informado', valor_cent: 9240 }] }), /informe como o cliente pagou/);
+});
+t('CPF: válido entra, inválido é recusado', () => {
+  assert.ok(fiscal.cpfValido('529.982.247-25'));
+  assert.ok(!fiscal.cpfValido('111.111.111-11'));
+  assert.ok(!fiscal.cpfValido('529.982.247-24'));
+  const { nota } = fiscal.montarNota({ itens: itensNota, cardapio: cardFiscal,
+    pagamentos: [{ forma: 'pix', valor_cent: 1 }], cpf: '529.982.247-25' });
+  assert.strictEqual(nota.cpf_destinatario, '52998224725');
+  assert.throws(() => fiscal.montarNota({ itens: itensNota, cardapio: cardFiscal,
+    pagamentos: [{ forma: 'pix', valor_cent: 1 }], cpf: '123.456.789-00' }), /CPF inválido/);
+});
+t('a data de emissão leva o fuso de Brasília e o horário de agora', () => {
+  const d = fiscal.dataEmissao(new Date('2026-09-22T23:40:00Z'));
+  assert.strictEqual(d, '2026-09-22T20:40:00-03:00');
+});
+t('campo extra do contador entra, mas não sobrescreve preço', () => {
+  const card = new Map([[1, { id: 1, nome: 'Burguer', estacao: 'cozinha',
+    fiscal_extra: JSON.stringify({ valor_bruto: 0.01, ibs_cbs_situacao_tributaria: '000' }) }]]);
+  const { nota } = fiscal.montarNota({ itens: [{ item_id: 1, nome: 'Burguer', qtd: 1, preco_cent: 3900 }],
+    cardapio: card, pagamentos: [{ forma: 'pix', valor_cent: 3900 }] });
+  assert.strictEqual(nota.items[0].valor_bruto, 39, 'o extra mudou o preço da nota');
+  assert.strictEqual(nota.items[0].ibs_cbs_situacao_tributaria, '000');
+});
+t('cadastro de exemplo sai marcado como não revisado', () => {
+  const { naoRevisados, avisos } = fiscal.montarNota({ itens: itensNota, cardapio: cardFiscal,
+    pagamentos: [{ forma: 'pix', valor_cent: 1 }] });
+  assert.deepStrictEqual(naoRevisados.sort(), ['Burguer da casa', 'Chopp Pilsen 300ml']);
+  assert.match(avisos[0], /não revisado/);
+});
+t('as respostas da Focus viram status do sistema', () => {
+  assert.strictEqual(fiscal.interpretar({ http: 401, texto: 'HTTP Basic: Access denied' }).status, 'erro');
+  const rej = fiscal.interpretar({ http: 201, json: { status: 'erro_autorizacao', status_sefaz: '704',
+    mensagem_sefaz: 'Rejeição: NFC-e com Data-Hora de emissão atrasada' } });
+  assert.match(rej.mensagem, /SEFAZ 704/);
+  const ok = fiscal.interpretar({ http: 201, json: { status: 'autorizado', chave_nfe: 'NFe123',
+    caminho_danfe: '/notas_fiscais_consumidor/NFe123.html', numero: '12', serie: '1' } });
+  assert.strictEqual(ok.chave, '123');
+  assert.ok(ok.danfe.endsWith('/notas_fiscais_consumidor/NFe123.html') && /^http/.test(ok.danfe));
 });
 
 /* ───────── 5. núcleo de visão (canvas) ───────── */
@@ -948,9 +1042,235 @@ t('padrão aprendido de cenas sintéticas reconhece a mesma cena', () => {
   });
 
   await ta('as páginas novas são servidas', async () => {
-    for (const p of ['/noite', '/qr', '/alerta.js', '/cardapio']) {
+    for (const p of ['/noite', '/qr', '/alerta.js', '/cardapio', '/cupom', '/sistema']) {
       assert.strictEqual((await fetch(base + p)).status, 200, `${p} falhou`);
     }
+  });
+
+  /* ---------- NFC-e de ponta a ponta ---------- */
+  console.log('\nNFC-e (dublê da Focus NFe)');
+  const focus = { proxima: 'autorizar', chamadas: 0, ultima: null, notas: new Map() };
+  const dubleFocus = http.createServer((req, res) => {
+    let corpo = '';
+    req.on('data', p => corpo += p);
+    req.on('end', () => {
+      focus.chamadas++;
+      const url = new URL(req.url, 'http://x');
+      focus.ultima = { metodo: req.method, url: req.url, auth: req.headers.authorization,
+        corpo: corpo ? JSON.parse(corpo) : null };
+      const responde = (c, o) => { res.writeHead(c, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); };
+      if (req.headers.authorization !== 'Basic ' + Buffer.from('token-focus-de-teste:').toString('base64')) {
+        res.writeHead(401, { 'content-type': 'text/html' }); return res.end('HTTP Basic: Access denied');
+      }
+      const ref = url.searchParams.get('ref') || decodeURIComponent(url.pathname.split('/').pop());
+      if (req.method === 'POST' && url.pathname === '/v2/nfce') {
+        if (focus.notas.get(ref)?.status === 'autorizado')
+          return responde(422, { codigo: 'already_processed', mensagem: 'A nota fiscal já foi autorizada' });
+        if (focus.proxima === 'rejeitar')
+          return responde(201, { ref, status: 'erro_autorizacao', status_sefaz: '704',
+            mensagem_sefaz: 'Rejeição: NFC-e com Data-Hora de emissão atrasada' });
+        const n = focus.notas.size + 1;
+        const nota = { ref, status: 'autorizado', status_sefaz: '100', mensagem_sefaz: 'Autorizado o uso da NF-e',
+          chave_nfe: 'NFe5226091234567800019565001' + String(n).padStart(9, '0') + '1000000001',
+          numero: String(n), serie: '1', caminho_danfe: `/notas_fiscais_consumidor/NFe${n}.html`,
+          caminho_xml_nota_fiscal: `/arquivos/${n}-nfe.xml`,
+          qrcode_url: `https://nfeweb.sefaz.go.gov.br/nfeweb/sites/nfce/d/?p=${n}`,
+          url_consulta_nf: 'https://nfeweb.sefaz.go.gov.br/nfeweb/sites/nfce/d' };
+        focus.notas.set(ref, nota);
+        /* "cair": a SEFAZ autorizou, mas a resposta nunca chega ao sistema */
+        if (focus.proxima === 'cair') return req.socket.destroy();
+        return responde(201, nota);
+      }
+      if (req.method === 'GET') {
+        const n = focus.notas.get(ref);
+        return n ? responde(200, n) : responde(404, { codigo: 'nfce_nao_encontrada', mensagem: 'NFC-e não encontrada.' });
+      }
+      if (req.method === 'DELETE') {
+        const n = focus.notas.get(ref);
+        if (!n) return responde(404, { codigo: 'nfce_nao_encontrada', mensagem: 'NFC-e não encontrada.' });
+        n.status = 'cancelado';
+        return responde(200, { status: 'cancelado', status_sefaz: '135',
+          mensagem_sefaz: 'Evento registrado e vinculado a NF-e', numero_protocolo: '152260000000001' });
+      }
+      responde(404, {});
+    });
+  });
+  await new Promise((ok, nao) => { dubleFocus.once('error', nao); dubleFocus.listen(PORTA_FOCUS, '127.0.0.1', ok); })
+    .catch(e => console.log(`  (dublê da Focus não subiu: ${e.message})`));
+
+  const tkGerente = (await chama('/api/entrar', { method: 'POST', corpo: { pin: '2468' } })).corpo.token;
+  const comoGerente = async fn => { const eu = token; token = tkGerente; try { return await fn(); } finally { token = eu; } };
+  const cardapioNF = (await chama('/api/cardapio')).corpo;
+  const burguer = cardapioNF.find(i => i.nome === 'Burguer da casa (180 g)');
+  const chopp300 = cardapioNF.find(i => i.nome === 'Chopp Pilsen 300ml');
+
+  async function fecharMesa(numero, { emitirNota = false, cpf = '', formas = ['pix'] } = {}) {
+    const a = await chama(`/api/mesas/${numero}/abrir`, { method: 'POST', corpo: { pessoas: 2 } });
+    const id = a.corpo.comanda_id;
+    await chama(`/api/comandas/${id}/itens`, { method: 'POST', corpo: { item_id: burguer.id, qtd: 2 } });
+    await chama(`/api/comandas/${id}/itens`, { method: 'POST', corpo: { item_id: chopp300.id, qtd: 3 } });
+    const c = (await chama(`/api/comandas/${id}`)).corpo;
+    const partes = contaMod.distribuir(c.total_cent, formas.map(() => 1));
+    const f = await chama(`/api/comandas/${id}/fechar`, { method: 'POST', corpo: { emitirNota, cpf,
+      pagamentos: formas.map((forma, k) => ({ forma, valor_cent: partes[k] })) } });
+    return { id, codigo: a.corpo.codigo, conta: c, fechamento: f };
+  }
+
+  let nf1;
+  await ta('fechar com nota: a NFC-e sai autorizada junto', async () => {
+    focus.proxima = 'autorizar';
+    nf1 = await fecharMesa(1, { emitirNota: true, cpf: '529.982.247-25', formas: ['pix', 'dinheiro'] });
+    assert.strictEqual(nf1.fechamento.status, 200, JSON.stringify(nf1.fechamento.corpo));
+    assert.strictEqual(nf1.fechamento.corpo.nota.status, 'autorizado', JSON.stringify(nf1.fechamento.corpo.nota));
+    assert.ok(nf1.fechamento.corpo.nota.chave && nf1.fechamento.corpo.nota.numero);
+  });
+  await ta('o pedido à Focus vai com Basic do token, CNPJ limpo e campos obrigatórios', async () => {
+    const u = focus.ultima;
+    assert.strictEqual(u.metodo, 'POST');
+    assert.match(u.url, /^\/v2\/nfce\?ref=burguer-\d+-1$/);
+    const n = u.corpo;
+    assert.strictEqual(n.cnpj_emitente, '12345678000195');
+    for (const k of ['data_emissao', 'presenca_comprador', 'modalidade_frete', 'local_destino', 'natureza_operacao'])
+      assert.ok(n[k], `faltou ${k}`);
+    assert.match(n.data_emissao, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}-03:00$/);
+    assert.strictEqual(n.cpf_destinatario, '52998224725');
+    for (const it of n.items) for (const k of ['numero_item', 'codigo_ncm', 'codigo_produto', 'descricao',
+      'quantidade_comercial', 'quantidade_tributavel', 'cfop', 'valor_unitario_comercial',
+      'valor_unitario_tributavel', 'valor_bruto', 'unidade_comercial', 'unidade_tributavel',
+      'icms_origem', 'icms_situacao_tributaria']) assert.ok(it[k] !== undefined, `item sem ${k}`);
+  });
+  await ta('a nota soma só a mercadoria, e o pagamento declarado fecha com ela', async () => {
+    const n = focus.ultima.corpo;
+    const itens = n.items.reduce((a, i) => a + Math.round(i.valor_bruto * 100) - Math.round((i.valor_desconto || 0) * 100), 0);
+    const pag = n.formas_pagamento.reduce((a, f) => a + Math.round(f.valor_pagamento * 100), 0);
+    assert.strictEqual(itens, nf1.conta.subtotal_cent, 'a nota não é o subtotal da mercadoria');
+    assert.strictEqual(pag, itens, 'o pagamento declarado não bate com a nota');
+    assert.deepStrictEqual(n.formas_pagamento.map(f => f.forma_pagamento), ['20', '01']);
+  });
+  await ta('pedir a nota de novo devolve a mesma, sem emitir outra', async () => {
+    const antes = focus.chamadas;
+    const r = await chama(`/api/comandas/${nf1.id}/nfce`, { method: 'POST', corpo: {} });
+    assert.strictEqual(r.corpo.jaExistia, true);
+    assert.strictEqual(focus.chamadas, antes, 'chamou a Focus de novo');
+  });
+  await ta('o cliente vê a nota pelo código da conta, com CPF mascarado', async () => {
+    const r = await (await fetch(`${base}/api/conta/${nf1.codigo}/nota`)).json();
+    assert.strictEqual(r.nota.status, 'autorizado');
+    assert.strictEqual(r.cpf, '529.***.***-25');
+    assert.ok(r.itens.length === 2 && r.nota.qrcode);
+  });
+  await ta('rejeição da SEFAZ vira erro legível, e a nova tentativa usa outra referência', async () => {
+    focus.proxima = 'rejeitar';
+    const r = await fecharMesa(2, { emitirNota: true });
+    assert.strictEqual(r.fechamento.corpo.nota.status, 'erro');
+    assert.match(r.fechamento.corpo.nota.mensagem, /SEFAZ 704/);
+    focus.proxima = 'autorizar';
+    const de2 = await chama(`/api/comandas/${r.id}/nfce`, { method: 'POST', corpo: {} });
+    assert.strictEqual(de2.corpo.nota.status, 'autorizado');
+    assert.match(de2.corpo.nota.ref, /-2$/, 'reusou a referência de uma nota rejeitada');
+  });
+  await ta('a rede cai depois da SEFAZ autorizar: fica pendente e a consulta recupera, sem nota dupla', async () => {
+    focus.proxima = 'cair';
+    const r = await fecharMesa(3, { emitirNota: true });
+    assert.strictEqual(r.fechamento.corpo.nota.status, 'pendente', JSON.stringify(r.fechamento.corpo.nota));
+    const ref = r.fechamento.corpo.nota.ref;
+    focus.proxima = 'autorizar';
+    const g = await chama(`/api/comandas/${r.id}/nfce`);
+    assert.strictEqual(g.corpo.nota.status, 'autorizado');
+    assert.strictEqual(g.corpo.nota.ref, ref, 'trocou de referência — seriam duas notas para uma venda');
+    const deNovo = await chama(`/api/comandas/${r.id}/nfce`, { method: 'POST', corpo: {} });
+    assert.strictEqual(deNovo.corpo.nota.ref, ref);
+  });
+  await ta('comanda com nota autorizada não reabre', async () => {
+    const r = await comoGerente(() => chama(`/api/comandas/${nf1.id}/reabrir`, { method: 'POST' }));
+    assert.strictEqual(r.status, 409);
+    assert.match(r.corpo.erro, /cancele a nota/);
+  });
+  await ta('cancelar: garçom não pode, justificativa curta não passa, gerente cancela', async () => {
+    const ref = nf1.fechamento.corpo.nota.ref;
+    assert.strictEqual((await chama(`/api/nfce/${ref}/cancelar`, { method: 'POST',
+      corpo: { justificativa: 'cliente desistiu da compra toda' } })).status, 403);
+    const curta = await comoGerente(() => chama(`/api/nfce/${ref}/cancelar`, { method: 'POST', corpo: { justificativa: 'errei' } }));
+    assert.strictEqual(curta.status, 422);
+    assert.match(curta.corpo.erro, /15 e 255/);
+    const ok = await comoGerente(() => chama(`/api/nfce/${ref}/cancelar`, { method: 'POST',
+      corpo: { justificativa: 'lançamento em duplicidade na mesa um' } }));
+    assert.strictEqual(ok.status, 200, JSON.stringify(ok.corpo));
+    assert.strictEqual(ok.corpo.nota.status, 'cancelado');
+    assert.strictEqual(focus.ultima.metodo, 'DELETE');
+    assert.strictEqual(focus.ultima.corpo.justificativa, 'lançamento em duplicidade na mesa um');
+  });
+  await ta('depois de 30 minutos não cancela', async () => {
+    const r = await fecharMesa(4, { emitirNota: true });
+    require('./server').banco().prepare('UPDATE notas SET autorizada_em=? WHERE ref=?')
+      .run(new Date(Date.now() - 31 * 60000).toISOString(), r.fechamento.corpo.nota.ref);
+    const c = await comoGerente(() => chama(`/api/nfce/${r.fechamento.corpo.nota.ref}/cancelar`, { method: 'POST',
+      corpo: { justificativa: 'tentativa fora do prazo legal' } }));
+    assert.strictEqual(c.status, 409);
+    assert.match(c.corpo.erro, /30 min/);
+  });
+  await ta('em produção, item com cadastro fiscal não revisado trava a nota', async () => {
+    fiscal.CONF.ambiente = 'producao';
+    try {
+      const r = await fecharMesa(5, { emitirNota: false });
+      const e = await chama(`/api/comandas/${r.id}/nfce`, { method: 'POST', corpo: {} });
+      assert.strictEqual(e.status, 409);
+      assert.ok(e.corpo.naoRevisados.length >= 1);
+      for (const it of [burguer, chopp300]) {
+        const f = (await comoGerente(() => chama('/api/cardapio/fiscal'))).corpo.find(x => x.id === it.id);
+        const p = await comoGerente(() => chama(`/api/cardapio/${it.id}/fiscal`, { method: 'PUT',
+          corpo: { ncm: f.ncm, cfop: f.cfop, csosn: f.csosn, origem: f.origem, unidade: f.unidade, revisado: true } }));
+        assert.strictEqual(p.status, 200);
+      }
+      const ok = await chama(`/api/comandas/${r.id}/nfce`, { method: 'POST', corpo: {} });
+      assert.strictEqual(ok.corpo.nota.status, 'autorizado');
+      assert.strictEqual(ok.corpo.nota.ambiente, 'producao');
+    } finally { fiscal.CONF.ambiente = 'homologacao'; }
+  });
+  await ta('cadastro fiscal: garçom não edita, NCM inválido não entra', async () => {
+    assert.strictEqual((await chama(`/api/cardapio/${burguer.id}/fiscal`, { method: 'PUT',
+      corpo: { ncm: '21069090', cfop: '5101', csosn: '102', origem: '0' } })).status, 403);
+    const r = await comoGerente(() => chama(`/api/cardapio/${burguer.id}/fiscal`, { method: 'PUT',
+      corpo: { ncm: '123', cfop: '5101', csosn: '102', origem: '0' } }));
+    assert.strictEqual(r.status, 400);
+    assert.match(r.corpo.erro, /NCM/);
+  });
+  await ta('sem token da Focus sai comprovante sem valor fiscal, e nada é enviado', async () => {
+    const guardado = fiscal.CONF.token;
+    fiscal.CONF.token = '';
+    try {
+      const antes = focus.chamadas;
+      const r = await fecharMesa(6, { emitirNota: true });
+      assert.strictEqual(r.fechamento.corpo.nota.status, 'nao-fiscal');
+      assert.match(r.fechamento.corpo.nota.mensagem, /SEM VALOR FISCAL/);
+      assert.strictEqual(focus.chamadas, antes, 'mandou algo para a Focus sem token');
+    } finally { fiscal.CONF.token = guardado; }
+  });
+  await ta('a noite lista as notas, cada uma com mesa e status', async () => {
+    const n = (await chama('/api/notas')).corpo;
+    const st = new Set(n.map(x => x.status));
+    for (const esperado of ['autorizado', 'cancelado', 'erro', 'nao-fiscal']) assert.ok(st.has(esperado), `faltou ${esperado}`);
+    assert.ok(n.every(x => Number.isInteger(x.mesa)));
+  });
+  await ta('teste de conexão fiscal: token aceito, sem emitir nada', async () => {
+    const antes = [...focus.notas.keys()].length;
+    const r = await comoGerente(() => chama('/api/sistema/testar-fiscal', { method: 'POST' }));
+    assert.strictEqual(r.corpo.ok, true, r.corpo.mensagem);
+    assert.strictEqual([...focus.notas.keys()].length, antes, 'o teste emitiu nota');
+  });
+  await ta('teste da IA pelo painel do sistema faz uma chamada de verdade ao cliente da API', async () => {
+    ia.resposta = 'funcionando';
+    const r = await comoGerente(() => chama('/api/sistema/testar-ia', { method: 'POST' }));
+    assert.strictEqual(r.corpo.ok, true, r.corpo.mensagem);
+    assert.match(r.corpo.mensagem, /funcionando/);
+    assert.strictEqual(ia.recebido.corpo.max_tokens, 10);
+  });
+  await ta('o painel do sistema é só do gerente e diz o modo fiscal', async () => {
+    assert.strictEqual((await chama('/api/sistema')).status, 403);
+    const r = await comoGerente(() => chama('/api/sistema'));
+    assert.strictEqual(r.corpo.fiscal.modo, 'homologacao');
+    assert.strictEqual(r.corpo.fiscal.cnpj, '12.345.678/0001-95');
+    assert.strictEqual(r.corpo.ia.ligada, true);
   });
 
   /* ---------- segurança ---------- */
@@ -1069,20 +1389,16 @@ t('padrão aprendido de cenas sintéticas reconhece a mesma cena', () => {
     assert.strictEqual((await r.json()).ok, true);
   });
   await ta('as páginas do frontend são servidas', async () => {
-    for (const p of ['/', '/salao', '/mesa', '/camera', '/bahrem.css', '/nucleo.js', '/app.js']) {
+    for (const p of ['/', '/salao', '/mesa', '/camera', '/burguer.css', '/nucleo.js', '/app.js']) {
       const r = await fetch(base + p);
       assert.strictEqual(r.status, 200, `${p} respondeu ${r.status}`);
     }
   });
-  await ta('a foto e o escudo saem com o tipo certo', async () => {
+  await ta('a foto de fundo sai como jpeg, e a logo não existe mais', async () => {
     const f = await fetch(`${base}/casa.jpg`);
     assert.strictEqual(f.status, 200);
     assert.match(f.headers.get('content-type'), /image\/jpeg/);
-    const m = await fetch(`${base}/marca.png`);
-    assert.strictEqual(m.status, 200);
-    assert.match(m.headers.get('content-type'), /image\/png/);
-    assert.ok(Number(m.headers.get('content-length') ?? 1e9) < 20000 ||
-      (await m.arrayBuffer()).byteLength < 20000, 'o escudo está pesado demais para um badge');
+    assert.strictEqual((await fetch(`${base}/marca.png`)).status, 404, 'a logo antiga ainda é servida');
   });
   await ta('a lista branca não deixa baixar código nem banco', async () => {
     for (const p of ['/server.js', '/testes.js', '/db.js', '/assistente.js', '/package.json',
@@ -1095,6 +1411,7 @@ t('padrão aprendido de cenas sintéticas reconhece a mesma cena', () => {
   servidor.close();
   duble.close();
   dubleIA.close();
+  dubleFocus.close();
   persistencia.parar();
   console.log(`\n${ok} passaram, ${falhas.length} falharam` + (falhas.length ? `: ${falhas.join(', ')}` : ''));
   process.exit(falhas.length ? 1 : 0);

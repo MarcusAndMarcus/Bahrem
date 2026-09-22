@@ -1,4 +1,4 @@
-# Bahrem · Salão
+# Burguer · Salão
 
 Controle de salão para bar: o garçom vê as mesas e a conta de cada uma, o cliente
 vê a própria comanda pelo celular, e o prato entra na comanda por foto.
@@ -9,7 +9,7 @@ Termux, no Render e em `localhost`.
 ```bash
 node seed.js      # carga inicial (só na primeira vez)
 node server.js    # sobe em http://localhost:3000
-node testes.js    # 112 testes do servidor
+node testes.js    # 139 testes do servidor
 npm run testes:dom  # execução das páginas (precisa de npm install)
 node montar.js    # remonta o protótipo de arquivo único
 ```
@@ -77,7 +77,7 @@ primeira pergunta, e campo + Enviar numa linha.
   alguém pediu a conta, a primeira sugestão é "Quem pediu a conta?". O botão
   "recolher" deixa só o título e o campo, e o navegador lembra da escolha.
   A tecla `/` leva direto para a pergunta.
-- **No celular do cliente**, é o Sommelier do Bahrem, entre a conta e as abas.
+- **No celular do cliente**, é o Sommelier do Burguer, entre a conta e as abas.
   O que ele sugere vira botão "+ Croqueta — R$ 64,00", que põe na sacola.
 
 O componente é um só (`caixinha.js`); cada página diz o texto, as sugestões e
@@ -116,7 +116,95 @@ baixado quando o serviço sobe.
 Sem foto, o cardápio mostra a inicial do prato numa moldura escura — nunca uma
 imagem de outro prato no lugar.
 
+## Nota fiscal: NFC-e pela Focus NFe
+
+"Cupom fiscal eletrônico", em Goiás e na maior parte do país, é a **NFC-e**
+(modelo 65). A Focus NFe assina o XML e fala com a SEFAZ; o sistema monta o
+pedido, envia, e guarda o que foi enviado e o que voltou. O contrato usado foi
+conferido na documentação da Focus de abril de 2026: emissão **síncrona** em
+`POST /v2/nfce?ref=…`, consulta em `GET`, cancelamento em `DELETE` com
+justificativa de 15 a 255 caracteres **em até 30 minutos**, autenticação HTTP
+Basic com o token.
+
+**Três modos, e o sistema diz qual está valendo** (painel `/sistema`):
+
+| Modo | Quando | O que sai |
+|---|---|---|
+| sem valor fiscal | sem `FOCUS_NFE_TOKEN` ou `FOCUS_NFE_CNPJ` | comprovante marcado SEM VALOR FISCAL; nada é enviado |
+| homologação | com token, `FOCUS_NFE_AMBIENTE=homologacao` (padrão) | NFC-e de teste da SEFAZ, sem valor fiscal |
+| produção | `FOCUS_NFE_AMBIENTE=producao` | NFC-e com valor fiscal — **só se todos os itens estiverem com o cadastro fiscal revisado** |
+
+**No fechamento**, a caixa "emitir NFC-e" vem marcada quando a Focus está
+configurada, com CPF opcional (validado pelos dígitos). Se a nota falhar, a
+conta **não** é desfeita: foi paga, a mesa está livre, e a nota se reemite pela
+gaveta ou pela tela da noite. Com `NFCE_AUTO=1`, toda conta fechada emite.
+
+**Os cuidados que o código toma:**
+
+- **Rede caindo no meio da emissão** é o caso perigoso: a SEFAZ pode ter
+  autorizado e a resposta se perdido. A nota fica "pendente", e a próxima
+  tentativa **consulta antes** e reusa a mesma referência — a Focus reconhece a
+  referência e não emite duas vezes. Só uma rejeição da SEFAZ abre referência
+  nova. O teste simula exatamente isso: autoriza, derruba a conexão, e confere
+  que a venda termina com uma nota só.
+- **Grava antes de enviar**: se o processo cair no meio, fica o registro de que
+  uma nota foi para a Focus com aquela referência. Nenhuma nota é apagada —
+  rejeitada, cancelada ou sem resposta, fica com o pedido e a resposta.
+- **Comanda com nota autorizada não reabre** sem cancelar a nota antes.
+- **Pix é o código 20 (Pix estático)**, não o 17: o Pix deste sistema é o QR
+  gerado a partir da chave, sem PSP. Cartão vai como maquininha avulsa
+  (`tipo_integracao` 2). Voucher entra como vale-refeição (11).
+- **A taxa de serviço fica fora da nota** — não é mercadoria. Como o cliente
+  pagou mais do que a nota soma, e a SEFAZ leria a diferença como troco, cada
+  forma de pagamento entra na nota com a sua proporção do total da nota, e a
+  soma bate no centavo.
+- **Data de emissão com fuso de Brasília explícito** (`NFCE_FUSO`, padrão
+  `-03:00`); a Focus recusa diferença de mais de 5 minutos do relógio.
+
+**O que é do contador, e por isso é editável e não decidido por mim:** NCM,
+CFOP, CSOSN/CST, origem e unidade de cada item (em `/cardapio`, botão
+"fiscal"). A carga inicial traz **exemplos** por tipo de item — preparo da
+cozinha, cerveja, refrigerante, água, vinho, drink — e todos saem marcados como
+**não revisados**. A homologação aceita; a produção recusa até o contador
+marcar "revisado". Tratar o serviço de outro jeito na nota também é decisão
+dele.
+
+**Reforma Tributária:** segundo a Focus, os campos de IBS/CBS por item entraram
+em produção em novembro de 2025, com validação ativa a partir de abril de 2026.
+**Não sei se o seu regime precisa deles na NFC-e hoje** — isso é pergunta para o
+contador. Se precisar, o campo "extra" do cadastro fiscal de cada item aceita o
+JSON que ele indicar e vai direto para a nota, sem mudar código. O sistema
+impede que esse extra sobrescreva quantidade, preço ou desconto.
+
+**O cupom** (`/cupom?c=CÓDIGO`) é o resumo da nota para o cliente, em papel
+claro de 80 mm na impressão, com o QR de consulta e a chave de acesso. Para a
+impressão oficial existe o botão "DANFE oficial", que abre o DANFE gerado pela
+Focus — o layout do DANFE NFC-e é regulado, e o documento com validade é o
+dela.
+
+**O que não está feito:** contingência offline (a Focus oferece, com
+comunicador próprio), inutilização de numeração e envio por e-mail. E nada
+disso foi testado contra a Focus de verdade — os testes usam um dublê que segue
+o contrato da documentação. **O primeiro teste real é em homologação**, com o
+token de homologação da sua conta na Focus.
+
 ## Claude no sistema
+
+### Ligar a IA no Render
+
+1. Crie a chave em **console.anthropic.com → API Keys** e coloque crédito em
+   **Billing** — sem crédito, a API responde que a conta está sem saldo.
+2. No Render, `ANTHROPIC_API_KEY` = a chave. Salve e deixe redeployar.
+3. Entre como gerente, abra **`/sistema`** e toque em **"testar agora"** no
+   painel da IA. Ele faz uma chamada de verdade, de 10 tokens, e mostra o que a
+   API respondeu — ou o motivo, em português: chave recusada, sem crédito,
+   limite de uso, API sobrecarregada.
+
+Conferido daqui contra a API real: o endpoint, os cabeçalhos e o formato do
+pedido passam até a autenticação, e uma chave inválida volta como "a chave da
+API foi recusada". O que eu não pude ver foi uma resposta completa — isso só com
+a sua chave, e é exatamente o que o botão de teste mostra.
+
 
 Três portas, e só estas três. A chave vive no servidor; o navegador nunca a vê.
 
@@ -166,8 +254,7 @@ O rateio divide o total em partes iguais e distribui o resto em centavos: a soma
 das partes é sempre exatamente o total, e a diferença entre a maior e a menor
 parte nunca passa de um centavo (testado com 10001/3, 1/4, 99999/7, 7/3).
 
-Serviço: 10% por padrão, destacado como opcional nas duas telas
-(Lei Municipal 9.418/14, citada no próprio cardápio digital da casa).
+Serviço: 10% por padrão, destacado como opcional nas duas telas.
 
 ## Reconhecimento do prato
 
@@ -321,7 +408,7 @@ Backspace corrige, e a caixinha some sozinha depois de 2,5 s.
 
 ## Estética
 
-**Gramática do UROBOROS, paleta do Bahrem.** A estrutura é a mesma língua dos
+**Gramática do UROBOROS, paleta do Burguer.** A estrutura é a mesma língua dos
 outros sistemas: preto, IBM Plex Mono como voz do sistema, rótulos em caixa
 alta espaçada, painéis numerados `[01]`, calibres, barramento URB1 em hex,
 densidade de instrumento. A cor é da casa.
@@ -331,10 +418,10 @@ vermelho é da casa, e eles não se cruzam.** Telemetria, calibres, medição e
 mira da câmera são teal (`--instru`). Chamada, urgência e marca são o vermelho
 medido (`--marca`). Dinheiro é âmbar (`--chopp`).
 
-Três cores são **medidas**, não escolhidas: `#e30613` ocupa 81,7% dos pixels do
-logotipo, e os neutros vêm da paleta reduzida da foto do salão (`#2a1913` no
+O vermelho `#e30613` é a cor da casa; os neutros vêm da paleta reduzida da foto
+do salão (`#2a1913` no
 escuro, `#b08764` na madeira, `#d0bfa4` na luz dos globos). Trocar o bloco
-`:root` no topo de `bahrem.css` muda o sistema inteiro:
+`:root` no topo de `burguer.css` muda o sistema inteiro:
 
 ```css
 --marca: #e30613;  --breu:  #0b0806;  --painel: #12100d;
@@ -347,9 +434,8 @@ Há escala de espaço (`--e1` a `--e6`) e de raio (`--r1` a `--r3`): nenhum
 padding solto no arquivo, o que é o que faz o conjunto parecer uma peça só.
 Números em `tabular-nums` — coluna de valor não dança quando o total muda.
 
-`casa.jpg` é a foto do salão e `marca.png` é o escudo — ambos
-fornecidos pela casa. A foto entra em `body::before` com desfoque de 7px e um
-véu por cima controlado por `--veu`: 0,9 nas telas de trabalho, onde há número
+`casa.jpg` é a foto de fundo do salão — troque pela da sua casa para a demonstração
+ficar sua. véu por cima controlado por `--veu`: 0,9 nas telas de trabalho, onde há número
 de mesa para ler, e 0,58 na portaria, onde não há nada competindo. Baixar o véu
 mostra mais salão; subir apaga a foto sem removê-la.
 
@@ -421,7 +507,7 @@ exigiria um driver npm, o que quebra o projeto inteiro sem dependência.
 
 ### Preparando o retrato
 
-1. Crie um repositório **privado** vazio, ex.: `MarcusAndMarcus/bahrem-dados`,
+1. Crie um repositório **privado** vazio, ex.: `MarcusAndMarcus/burguer-dados`,
    com um commit inicial no ramo `main` (pode ser um README de uma linha —
    a API precisa do ramo existindo).
 2. GitHub → Settings → Developer settings → Personal access tokens →
@@ -434,9 +520,9 @@ O token fica só no painel: as duas chaves estão como `sync: false` no
 ### Deploy (a partir do Termux)
 
 ```bash
-cd bahrem-salao
+cd burguer-salao
 git init && git add -A && git commit -m "salao"
-git remote add origin git@github.com:MarcusAndMarcus/bahrem-salao.git
+git remote add origin git@github.com:MarcusAndMarcus/burguer-salao.git
 git push -u origin main
 ```
 
@@ -447,9 +533,9 @@ Preencha `PIX_CHAVE`, `SNAP_REPO` e `SNAP_TOKEN` no painel.
 
 **`Cannot find module '/opt/render/project/src/server.js'`** — os arquivos estão
 numa subpasta do repositório, e o Render roda a partir da raiz. O próprio log
-entrega isso na linha `Using Node.js version ... via bahrem-salao/package.json`:
+entrega isso na linha `Using Node.js version ... via burguer-salao/package.json`:
 se aparece um caminho com pasta ali, a raiz está um nível abaixo. Resolve-se em
-Settings → **Root Directory** = nome da pasta (`bahrem-salao`). Blueprint é
+Settings → **Root Directory** = nome da pasta (`burguer-salao`). Blueprint é
 diferente: o `render.yaml` **precisa** estar na raiz do repositório, então nesse
 caso não há Root Directory que resolva — é mover os arquivos para a raiz.
 
@@ -486,6 +572,12 @@ não funcionaria: o Chrome bloqueia antes de pedir permissão.
 | `NOITE_INICIO` | hora da virada da noite (12) |
 | `FUNDO_TROCO` | fundo de troco da gaveta, em reais, para a conferência |
 | `SESSAO_SEGREDO` | assina as sessões; qualquer texto longo e aleatório |
+| `ANTHROPIC_API_KEY` | liga o assistente do cliente, o da equipe e a camada 2 da câmera |
+| `FOCUS_NFE_TOKEN` | token da Focus NFe (o de homologação ou o de produção) |
+| `FOCUS_NFE_CNPJ` | CNPJ do emitente, com ou sem pontuação |
+| `FOCUS_NFE_AMBIENTE` | `homologacao` (padrão) ou `producao` |
+| `NFCE_AUTO` | `1` para toda conta fechada emitir NFC-e |
+| `NFCE_FUSO` | fuso da data de emissão (padrão `-03:00`) |
 | `DIAS_EVENTO` | dias de telemetria URB1 mantidos (7) |
 
 ## Caixa: como o dinheiro entrou
@@ -537,7 +629,7 @@ com `integrity` fixado — não escrevi encoder de QR à mão, que é risco sem
 retorno. O botão "QR desta mesa" fica na aba Comanda da gaveta.
 
 ## O que ainda não existe
-- NFC-e — o Focus NFe do Alphaville encaixa aqui sem mudar o resto;
+- NFC-e em contingência offline, inutilização de numeração e envio por e-mail;
 - sangria, suprimento e fechamento de caixa por operador;
 - baixa automática do Pix (hoje é confirmação manual);
 - reserva de mesa e brinquedoteca;

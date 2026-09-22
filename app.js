@@ -19,10 +19,10 @@
   }
 
   const guarda = {
-    get token() { return localStorage.getItem('bahrem.token') || ''; },
-    set token(v) { v ? localStorage.setItem('bahrem.token', v) : localStorage.removeItem('bahrem.token'); },
-    get eu() { try { return JSON.parse(localStorage.getItem('bahrem.eu') || 'null'); } catch { return null; } },
-    set eu(v) { localStorage.setItem('bahrem.eu', JSON.stringify(v)); }
+    get token() { return localStorage.getItem('burguer.token') || ''; },
+    set token(v) { v ? localStorage.setItem('burguer.token', v) : localStorage.removeItem('burguer.token'); },
+    get eu() { try { return JSON.parse(localStorage.getItem('burguer.eu') || 'null'); } catch { return null; } },
+    set eu(v) { localStorage.setItem('burguer.eu', JSON.stringify(v)); }
   };
 
   async function api(rota, opcoes = {}) {

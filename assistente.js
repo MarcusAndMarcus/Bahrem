@@ -46,6 +46,24 @@ const contabiliza = codigo => {
 };
 const esquece = codigo => porMesa.delete(codigo);
 
+/* ---------- erros da API, em português de quem opera ----------
+   Os tipos de erro são os que a API da Anthropic devolve no corpo
+   ({"type":"error","error":{"type":…,"message":…}}). O primeiro problema real
+   costuma ser conta sem crédito, que chega como 400 — sem esta tradução, o
+   gerente veria o JSON cru. */
+function erroDaApi(status, bruto) {
+  let tipo = '', msg = '';
+  try { const j = JSON.parse(bruto); tipo = j?.error?.type || ''; msg = j?.error?.message || ''; } catch { msg = String(bruto || ''); }
+  if (status === 401 || tipo === 'authentication_error') return `a chave da API foi recusada — confira a ANTHROPIC_API_KEY (401)`;
+  if (status === 403 || tipo === 'permission_error') return `a chave não tem permissão para este uso (403): ${msg}`;
+  if (status === 404 || tipo === 'not_found_error') return `modelo não encontrado: ${MODELO} (404)`;
+  if (/credit balance/i.test(msg)) return 'a conta da Anthropic está sem crédito — adicione em console.anthropic.com, em Billing (400)';
+  if (status === 429 || tipo === 'rate_limit_error') return 'limite de uso da API atingido — tente em instantes (429)';
+  if (status === 529 || tipo === 'overloaded_error') return 'a API está sobrecarregada agora — tente em instantes (529)';
+  if (status >= 500) return `a API está com problema agora (${status})`;
+  return `a API respondeu ${status}${msg ? `: ${msg.slice(0, 160)}` : ''}`;
+}
+
 /* ---------- chamada crua ---------- */
 async function chamar({ sistema, mensagens, maxTokens = 500, modelo = MODELO }) {
   if (!ligado()) throw new Error('ANTHROPIC_API_KEY não configurada');
@@ -56,10 +74,7 @@ async function chamar({ sistema, mensagens, maxTokens = 500, modelo = MODELO }) 
       'anthropic-version': '2023-06-01' },
     body: JSON.stringify({ model: modelo, max_tokens: maxTokens, system: sistema, messages: mensagens })
   });
-  if (!r.ok) {
-    const detalhe = await r.text().catch(() => '');
-    throw new Error(`a API respondeu ${r.status}${detalhe ? `: ${detalhe.slice(0, 180)}` : ''}`);
-  }
+  if (!r.ok) throw new Error(erroDaApi(r.status, await r.text().catch(() => '')));
   const dados = await r.json();
   return (dados.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
 }
@@ -295,5 +310,5 @@ async function olharPrato({ foto, candidatos }) {
     porque: String(j.porque || '').slice(0, 120) };
 }
 
-module.exports = { ligado, assistir, assistirEquipe, retratoSalao, olharPrato, chamar, comoJson,
+module.exports = { erroDaApi, ligado, assistir, assistirEquipe, retratoSalao, olharPrato, chamar, comoJson,
   permite, contabiliza, esquece, MODELO, TETO_MESA, TETO_HORA };

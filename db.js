@@ -31,7 +31,22 @@ function esquema(db) {
     id INTEGER PRIMARY KEY, nome TEXT NOT NULL, categoria TEXT NOT NULL,
     preco_cent INTEGER NOT NULL, estacao TEXT NOT NULL DEFAULT 'cozinha',
     afericao INTEGER NOT NULL DEFAULT 0, ativo INTEGER NOT NULL DEFAULT 1,
-    foto_versao INTEGER);
+    foto_versao INTEGER,
+    ncm TEXT, cfop TEXT, csosn TEXT, origem TEXT, unidade TEXT,
+    fiscal_revisado INTEGER NOT NULL DEFAULT 0, fiscal_extra TEXT);
+
+  /* NFC-e: uma linha por tentativa. Nada aqui é apagado — nota rejeitada,
+     cancelada ou emitida fora do ar fica registrada com o que foi enviado e o
+     que voltou, porque é disso que o contador precisa quando algo não bate. */
+  CREATE TABLE IF NOT EXISTS notas (
+    id INTEGER PRIMARY KEY,
+    comanda_id INTEGER NOT NULL REFERENCES comandas(id),
+    ref TEXT NOT NULL UNIQUE, ambiente TEXT NOT NULL, status TEXT NOT NULL,
+    chave TEXT, numero TEXT, serie TEXT, mensagem TEXT,
+    danfe TEXT, xml TEXT, qrcode TEXT, consulta TEXT,
+    total_cent INTEGER NOT NULL, cpf TEXT, payload TEXT, resposta TEXT,
+    criado_em TEXT NOT NULL, atualizado_em TEXT NOT NULL,
+    autorizada_em TEXT, cancelada_em TEXT, justificativa TEXT, por INTEGER);
 
   CREATE TABLE IF NOT EXISTS padroes (
     id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES cardapio(id) ON DELETE CASCADE,
@@ -83,6 +98,7 @@ function esquema(db) {
   CREATE INDEX IF NOT EXISTS ix_lanc_comanda ON lancamentos(comanda_id);
   CREATE INDEX IF NOT EXISTS ix_lanc_estado ON lancamentos(estado);
   CREATE INDEX IF NOT EXISTS ix_pag_comanda ON pagamentos(comanda_id);
+  CREATE INDEX IF NOT EXISTS ix_notas_comanda ON notas(comanda_id);
   CREATE INDEX IF NOT EXISTS ix_comanda_mesa ON comandas(mesa_id, status);
   `);
 }
@@ -101,7 +117,10 @@ function migrar(db) {
     ['comandas', 'nomes', 'TEXT'],
     ['lancamentos', 'estornado_em', 'TEXT'],
     ['lancamentos', 'estornado_por', 'INTEGER'],
-    ['cardapio', 'foto_versao', 'INTEGER']
+    ['cardapio', 'foto_versao', 'INTEGER'],
+    ['cardapio', 'ncm', 'TEXT'], ['cardapio', 'cfop', 'TEXT'], ['cardapio', 'csosn', 'TEXT'],
+    ['cardapio', 'origem', 'TEXT'], ['cardapio', 'unidade', 'TEXT'],
+    ['cardapio', 'fiscal_revisado', 'INTEGER NOT NULL DEFAULT 0'], ['cardapio', 'fiscal_extra', 'TEXT']
   ];
   for (const [tabela, coluna, tipo] of novas) {
     if (!tem(tabela, coluna)) db.exec(`ALTER TABLE ${tabela} ADD COLUMN ${coluna} ${tipo}`);

@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sistema · Burguer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400;0,600;0,800;1,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/burguer.css">
+</head>
+<body>
+
+<header class="topo">
+  <div class="marca">Sistema</div>
+  <div class="vaga"></div>
+  <a class="btn miudo" href="/salao">voltar ao salão</a>
+</header>
+
+<nav class="abas">
+  <a href="/salao">Salão</a>
+  <a href="/passe">Passe</a>
+  <a href="/noite">Noite</a>
+  <a href="/cardapio">Cardápio</a>
+  <a href="/sistema" class="aqui">Sistema</a>
+</nav>
+
+<main class="sistema" id="sistema"><p class="vazio">lendo o sistema…</p></main>
+
+<script src="/app.js"></script>
+<script>
+(function () {
+  const { $, $$, esc, api, decorrido } = B;
+
+  /* Cada cartão diz o estado e, quando dá, oferece um teste de verdade:
+     o teste da IA faz uma chamada real à API da Anthropic (10 tokens), o
+     teste fiscal consulta a Focus NFe sem emitir nota nenhuma. Verde aqui
+     significa "a outra ponta respondeu", não "está configurado". */
+  async function carregar() {
+    let s;
+    try { s = await api('/api/sistema'); }
+    catch (e) { $('#sistema').innerHTML = `<p class="vazio">${esc(e.message)}</p>`; return; }
+
+    const cartao = (n, titulo, estado, linhas, teste) => `
+      <section class="painel">
+        <h2 data-n="${n}">${titulo} <span class="luz ${estado}"></span></h2>
+        <div class="dentro">
+          ${linhas.map(([k, v]) => `<div class="linha-sis"><span>${esc(k)}</span><b>${v}</b></div>`).join('')}
+          ${teste ? `<button class="btn" data-testar="${teste}">testar agora</button>
+            <div class="resultado" id="res-${teste}"></div>` : ''}
+        </div>
+      </section>`;
+
+    const f = s.fiscal;
+    const modoFiscal = { 'nao-fiscal': 'sem valor fiscal (comprovante)', homologacao: 'homologação (teste da SEFAZ)',
+      producao: 'PRODUÇÃO — nota com valor fiscal' }[f.modo];
+
+    $('#sistema').innerHTML =
+      cartao('01', 'Inteligência artificial', s.ia.ligada ? 'amarela' : 'vermelha', [
+        ['chave da API', s.ia.ligada ? 'configurada' : '<em>ANTHROPIC_API_KEY ausente</em>'],
+        ['modelo', esc(s.ia.modelo)],
+        ['teto por mesa', `${s.ia.tetos.mesa} perguntas`],
+        ['teto da casa', `${s.ia.tetos.hora} chamadas por hora`]
+      ], s.ia.ligada ? 'ia' : null) +
+      cartao('02', 'Nota fiscal (NFC-e)', f.modo === 'nao-fiscal' ? 'vermelha' : 'amarela', [
+        ['modo', esc(modoFiscal)],
+        ['CNPJ emitente', f.cnpj ? esc(f.cnpj) : '<em>FOCUS_NFE_CNPJ ausente</em>'],
+        ['emite ao fechar', f.auto ? 'sempre (NFCE_AUTO=1)' : 'quando marcado no fechamento'],
+        ['itens sem revisão fiscal', f.itensNaoRevisados
+          ? `<a href="/cardapio">${f.itensNaoRevisados} — revisar com o contador</a>` : 'nenhum']
+      ], f.modo !== 'nao-fiscal' ? 'fiscal' : null) +
+      cartao('03', 'Dados', s.dados.modo === 'github' && !s.dados.erro ? 'verde' : 'vermelha', [
+        ['persistência', s.dados.modo === 'github' ? 'retrato no repositório privado' : '<em>volátil — some no restart</em>'],
+        ['último retrato', s.dados.ultimoRetrato ? `há ${esc(decorrido(s.dados.ultimoRetrato))}` : '—'],
+        ...(s.dados.erro ? [['erro', `<em>${esc(s.dados.erro)}</em>`]] : [])
+      ]) +
+      cartao('04', 'Sessão e Pix', s.sessao.segredoFixo && s.pix.chave ? 'verde' : 'amarela', [
+        ['sessão', s.sessao.segredoFixo ? 'sobrevive ao restart' : '<em>SESSAO_SEGREDO ausente — restart desloga</em>'],
+        ['Pix copia-e-cola', s.pix.chave ? 'chave configurada' : '<em>PIX_CHAVE ausente</em>']
+      ]);
+
+    $$('#sistema [data-testar]').forEach(b => b.onclick = async () => {
+      const qual = b.dataset.testar, alvo = $(`#res-${qual}`);
+      b.disabled = true; alvo.className = 'resultado'; alvo.textContent = 'testando…';
+      try {
+        const r = await api(`/api/sistema/testar-${qual}`, { method: 'POST' });
+        alvo.className = `resultado ${r.ok ? 'ok' : 'ruim'}`;
+        alvo.textContent = r.mensagem;
+        const luz = b.closest('.painel').querySelector('.luz');
+        luz.className = `luz ${r.ok ? 'verde' : 'vermelha'}`;
+      } catch (e) { alvo.className = 'resultado ruim'; alvo.textContent = e.message; }
+      b.disabled = false;
+    });
+  }
+
+  carregar();
+})();
+</script>
+</body>
+</html>

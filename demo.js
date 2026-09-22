@@ -407,10 +407,15 @@
           <span>${FORMAS.find(x => x[0] === l.forma)[1]}</span><span>${real(l.valor)}</span></div>`).join('')}
           ${troco ? `<div class="soma"><span>troco</span><span>${real(troco)}</span></div>` : ''}</div>
         <div class="campo" style="margin-top:14px"><label>Pix copia e cola (chave de exemplo)</label>
-          <input readonly value="${esc(PIX.brcode({ chave: 'bahrem@exemplo.com.br', valor: c.total_cent / 100,
-            nome: 'Bahrem Marista', cidade: 'Goiania', txid: m.codigo }))}" onclick="this.select()"></div>
+          <input readonly value="${esc(PIX.brcode({ chave: 'burguer@exemplo.com.br', valor: c.total_cent / 100,
+            nome: 'Burguer', cidade: 'Goiania', txid: m.codigo }))}" onclick="this.select()"></div>
         <p class="nota">No sistema real o código só aparece com a chave Pix configurada, e a baixa
           continua manual: confira no app do banco antes de liberar a mesa.</p>`;
+      $('#gCorpo').insertAdjacentHTML('beforeend', `<div class="veredito duvida" style="margin-top:14px">
+        <b>Nota fiscal</b><br>No protótipo não há Focus NFe: sai o comprovante sem valor fiscal,
+        montado pela mesma função que, no sistema instalado, gera a NFC-e.
+        <div style="margin-top:10px"><button class="btn miudo" id="verCupom">ver o comprovante</button></div></div>`);
+      $('#verCupom').onclick = () => mostrarCupom(m, linhas);
       $('#gPe').innerHTML = `<button class="btn forte" id="okF">Voltar ao salão</button>`;
       $('#okF').onclick = () => {
         Object.assign(m, { pessoas: 0, itens: [], chamada: null, desconto: 0, descontoMotivo: null, nomes: null });
@@ -419,6 +424,35 @@
     }
 
     tela();
+  }
+
+  /* comprovante sem valor fiscal, com os números que iriam para a SEFAZ */
+  function mostrarCupom(m, linhas) {
+    let montada;
+    try {
+      montada = Fiscal.montarNota({
+        itens: m.itens.filter(i => i.estado !== 'sugerido' && i.estado !== 'recusado')
+          .map(i => ({ item_id: i.item_id, nome: i.nome, qtd: i.qtd, preco_cent: i.preco_cent, estacao: i.estacao })),
+        cardapio: new Map(CARDAPIO.map(i => [i.id, i])),
+        desconto_cent: m.desconto || 0,
+        pagamentos: linhas.map(l => ({ forma: l.forma, valor_cent: l.valor }))
+      });
+    } catch (e) { return alerta(e.message); }
+    const n = montada.nota;
+    const COD = { '01': 'Dinheiro', '03': 'Crédito', '04': 'Débito', '11': 'Vale-refeição', '20': 'Pix' };
+    $('#gTitulo').textContent = 'Comprovante';
+    $('#gCorpo').innerHTML = `<div class="cupom-demo">
+      <p class="cupom-faixa">COMPROVANTE SEM VALOR FISCAL</p>
+      <p class="cupom-centro">BURGUER · mesa ${m.numero}</p>
+      ${n.items.map(i => `<div class="cupom-linha"><span>${i.quantidade_comercial} × ${esc(i.descricao)}</span>
+        <span>${real(Math.round(i.valor_bruto * 100))}</span></div>
+        <div class="cupom-miudo">NCM ${i.codigo_ncm} · CFOP ${i.cfop} · CSOSN ${i.icms_situacao_tributaria}</div>`).join('')}
+      <div class="cupom-linha cupom-total"><span>TOTAL</span><span>${real(montada.total_cent)}</span></div>
+      ${n.formas_pagamento.map(f => `<div class="cupom-linha cupom-miudo"><span>${COD[f.forma_pagamento] || f.forma_pagamento}
+        (tPag ${f.forma_pagamento})</span><span>${real(Math.round(f.valor_pagamento * 100))}</span></div>`).join('')}
+      <p class="cupom-miudo">Taxa de serviço cobrada à parte, fora da nota. Cadastro fiscal de exemplo — em
+        produção, só sai nota com NCM, CFOP e CSOSN revisados pelo contador.</p>
+    </div>`;
   }
 
   /* ---------- a noite ---------- */
@@ -544,8 +578,7 @@
 
     $('#clienteTopo').innerHTML = `<div class="conta" style="padding-bottom:0">
       <div class="talao">
-        <img class="selo" src="/marca.png" alt="" style="margin-bottom:10px">
-        <h1>Bahrem Marista</h1>
+        <h1>Burguer</h1>
         <div class="mesaNum">${m.numero}</div>
         <div class="sub">${AREAS[m.area]} · ${m.pessoas} ${m.pessoas > 1 ? 'pessoas' : 'pessoa'} ·
           aberta há ${dec(Date.now() - m.abertaEm)}</div>
@@ -590,7 +623,7 @@
       <div class="soma"><span>serviço ${SERVICO}% (opcional)</span><span>${real(c.servico_cent)}</span></div>
       <div class="soma total"><span>total</span><b>${real(c.total_cent)}</b></div></div>
       <div class="rateio">${c.rateado ? 'dividindo pelo que cada um marcou' : `dividindo por ${m.pessoas}`}: <b>${faixa}</b></div>
-      <p class="nota">Os ${SERVICO}% de serviço são opcionais (Lei Municipal 9.418/14).</p></div>`;
+      <p class="nota">Os ${SERVICO}% de serviço são opcionais.</p></div>`;
   }
 
   function cliCardapio(m) {
@@ -880,7 +913,7 @@ Responda SEMPRE um único objeto JSON: {"resposta":"texto","mesas":[números de 
 
   const cxCliente = Caixinha.montar({
     alvo: '#caixinhaMesa',
-    rotulo: 'Sommelier do Bahrem',
+    rotulo: 'Sommelier do Burguer',
     titulo: 'Posso sugerir o pedido perfeito pra hoje?',
     subtitulo: 'Conte quantos são, a fome do momento ou o que estão com vontade — eu sugiro do cardápio da casa.',
     placeholder: 'Ex.: somos quatro, com fome…',
@@ -916,7 +949,7 @@ Responda SEMPRE um único objeto JSON: {"resposta":"texto","mesas":[números de 
     placeholder: 'Ex.: quem espera comida há mais tempo?',
     sugestoes: ['Quem espera comida há mais tempo?', 'Quem pediu a conta?', 'Tem pedido do celular parado?', 'Quanto tem em aberto?'],
     aviso: 'Lê e responde; não abre, não fecha, não lança. No protótipo, vai pela sua conta Claude.',
-    recolhivel: true, chave: 'bahrem.caixinha.salao',
+    recolhivel: true, chave: 'burguer.caixinha.salao',
     enviar: async (pergunta, historico) => {
       if (!sample) semSample();
       const turnos = [{ role: 'user', content: `${MOLDE_EQUIPE}\n\nESTADO DO SALÃO:\n${retrato()}` },
