@@ -9,7 +9,7 @@ Termux, no Render e em `localhost`.
 ```bash
 node seed.js      # carga inicial (só na primeira vez)
 node server.js    # sobe em http://localhost:3000
-node testes.js    # 139 testes do servidor
+node testes.js    # 181 testes do servidor
 npm run testes:dom  # execução das páginas (precisa de npm install)
 node montar.js    # remonta o protótipo de arquivo único
 ```
@@ -115,6 +115,128 @@ baixado quando o serviço sobe.
 
 Sem foto, o cardápio mostra a inicial do prato numa moldura escura — nunca uma
 imagem de outro prato no lugar.
+
+## Reconhecimento: núcleo versão 3
+
+O que decide não é mais só a distância entre a foto e o padrão: cada medição
+informa, **grandeza por grandeza, o quanto ela merece confiança naquela foto**,
+e o comparador usa esses pesos. Prato cortado pelo quadro derruba as grandezas
+de posição; foto borrada derruba textura; louça estourada derruba cor. É isto
+que faz o enquadramento deixar de ser exigência: o que não dá para medir
+direito pesa menos, em vez de reprovar a foto inteira.
+
+**Três grandezas novas** — `textura` (quanto a luz varia dentro da comida),
+`contraste` e `matiz` (o quanto a cor é uniforme). Na bancada de prato liso ×
+prato granulado, mesma cor e mesmo tamanho: com as 8 grandezas antigas a
+separação era **1,02×** (o prato errado tão perto quanto o certo, empate); com
+as 11, **5,2×**. Rode `node calibra-forma.js` para reproduzir.
+
+**Enquadramento, medido em cena sintética:**
+
+| situação | antes | agora |
+|---|---|---|
+| prato 63% visível | afastamento 8,4 — rejeitado | **2,6** — confirma na mão |
+| metade do prato fora | recusava a foto | lê, decidindo por cor e textura |
+| limite de prato visível | 55% | **35%** |
+| prato encostado na borda | desvio 0,056 na ocupação | **0,017** |
+| 320×240 contra 480×360 | textura 0,0136 | **0,0060** |
+| 4032×3024, retrato, 1280×960 | — | desvio abaixo de 0,003 |
+
+Duas correções de raiz sustentam isso: **ocupação** passou a ser comida ÷ prato
+contando só a parte visível (antes dividia a comida visível pelo prato inteiro
+reconstruído, e bastava o prato sair um pouco para ela despencar), e **textura
+e contraste** passaram a ser medidos em escala do prato, com passo fracionário
+interpolado, em vez de em pixels da foto.
+
+**As medidas mudaram de definição, então os padrões precisam ser regravados**
+pela câmera. O sistema detecta a diferença de versão e diz isso, em vez de
+comparar coisas incomparáveis.
+
+**Resíduo conhecido:** prato ocupando menos de ~15% de um quadro grande ainda
+desloca a textura em ~0,02, porque a informação não está no quadro de trabalho.
+Na prática o zoom automático evita esse caso; a solução completa seria o núcleo
+remedir num recorte em resolução cheia, e não está feita.
+
+## Automação da câmera
+
+- **Zoom automático:** a lente aproxima ou afasta sozinha até o prato ocupar
+  cerca de 62% do quadro, entre duas leituras do guia. Onde o aparelho não
+  expõe zoom, nada acontece — a medição lê em qualquer tamanho de prato.
+- **Lanterna automática** quando as leituras seguidas vêm escuras.
+- **Prato já pendente:** se a mesa já espera aquele prato, o caminho normal
+  deixa de ser "lançar" e passa a ser **"marcar entregue"** — lançar de novo
+  cobraria duas vezes. Se nenhuma mesa foi escolhida e só uma espera aquele
+  prato, ela aparece como um toque.
+- **Continua valendo:** guia ao vivo 4×/s, foto sozinha quando o prato fica
+  firme, três quadros com média, contagem de 3 s antes de lançar com desfazer,
+  e trava contra lançar o mesmo prato duas vezes.
+
+## Revisão: o que estava falhando
+
+Cada item abaixo foi reproduzido executando antes de ser corrigido, e cada um
+tem hoje um teste que **reprova a versão antiga e passa na nova** — conferido
+rodando os testes novos contra o código anterior.
+
+1. **O tempo real não entregava 8 dos 17 tipos de evento.** O servidor mandava
+   eventos com nome, e o navegador só entrega evento nomeado a quem escuta
+   aquele nome exato; as telas escutavam 9. Pedido do celular, item pronto,
+   transferência, desconto e nota nunca chegavam — e os avisos sonoros de
+   pedido do celular e de item pronto nunca tocaram. Agora é um canal só, com
+   o tipo dentro do dado. O teste abre o canal de verdade, faz o cliente pedir
+   e a cozinha marcar pronto, e confere que os dois chegam.
+2. **"Dividir", na tela do cliente, levava ao PIN da equipe.** A tela chamava
+   a rota da equipe; sem login, 401, e o 401 redirecionava. Agora há uma rota
+   pelo código da conta, que só mexe em item daquela conta.
+3. **Fuso.** A virada da noite e o gráfico por hora usavam o relógio do
+   servidor; num servidor em UTC, a noite virava às 9h de Brasília e 23h
+   aparecia como 2h. Agora todo cálculo de hora passa pelo fuso da casa
+   (`FUSO`), e a bateria inteira passa com o servidor em outro fuso.
+4. **Ticket médio misturava comandas abertas no cálculo** e mostrava ao lado o
+   número só das fechadas. Agora é o que entrou dividido pelas que fecharam.
+5. **"Pediu a conta" saía no barramento URB1 como chamada de garçom** — a
+   comparação olhava o tipo do evento em vez do pedido.
+6. **`captura.js` sumiu de uma cópia da entrega em silêncio** e a tela da
+   câmera foi ao ar chamando `Captura.nova()` sem o arquivo. Agora um teste lê
+   cada página, busca do servidor tudo que ela carrega e falha se faltar — e
+   ele já pegou uma segunda falha na hora: a câmera usando `Alerta` sem
+   carregar `alerta.js`.
+7. **A versão do núcleo estava escrita à mão no servidor** (`=== 2 ? 2 : 1`):
+   padrão medido pela v3 era gravado como v1, e nenhum prato voltaria a ser
+   reconhecido depois de atualizar o núcleo. Um teste agora grava um padrão
+   com o núcleo de verdade e exige que a foto seguinte seja reconhecida.
+
+E o que foi endurecido ou otimizado:
+
+- **Chamar o garçom** segura o segundo aviso igual em menos de 30 s — sem
+  isso, um dedo nervoso fazia o tablet do salão apitar sem parar.
+- **Código da conta com 48 bits** (12 caracteres) em vez de 32: varrer códigos
+  atrás das contas abertas deixa de ser questão de dias.
+- **Índice na tabela de eventos.** O salão a consultava mesa a mesa a cada
+  leitura. Medido com uma semana de eventos (30 mil) e 18 mesas abertas:
+  de 19,9 ms para 2,8 ms por leitura, 7× mais rápido. Medido neste ambiente;
+  no Render free, não medi.
+- **Recarga agrupada:** uma rajada de eventos vira uma leitura só, e uma
+  recarga de segurança a cada 45 s cobre o canal que cair calado.
+- **Cada tela ouve o que interessa a ela:** o passe apita quando entra item
+  novo na fila; o salão, com chamadas, pedidos do celular e itens prontos.
+
+**No reconhecimento:**
+
+- **Três quadros por foto, e a média deles.** Mão tremendo muda as medidas de
+  um quadro para o outro; a média derruba o ruído, e quando os quadros variam
+  demais a tela avisa.
+- **A camada 2 recebe só o recorte do prato**, não o quadro inteiro: menos
+  imagem para a API, e nada de mãos e rostos de clientes indo para fora.
+- **Pratos gêmeos avisados no cadastro:** ao gravar um padrão, o sistema mede a
+  distância dele para os outros e diz na hora se a geometria não vai separar.
+- **O acerto, medido no uso** (`/sistema`, painel 05): cada lançamento feito
+  pela câmera junta o que o sistema previu com o que o garçom de fato lançou.
+  Taxa por camada, pares confundidos, lançamentos estornados depois. Abaixo de
+  30 confirmações o painel avisa que o número ainda não diz muito.
+
+Depois desta revisão, o núcleo de medição foi refeito (versão 2): lê prato
+parcialmente fora do quadro, inclinado, sob luz colorida, em mesa clara e em
+tábua. Os números estão na seção "Reconhecimento do prato".
 
 ## Nota fiscal: NFC-e pela Focus NFe
 
@@ -258,71 +380,112 @@ Serviço: 10% por padrão, destacado como opcional nas duas telas.
 
 ## Reconhecimento do prato
 
-Mesmo esqueleto do ALEX/AFERIDOR, adaptado de *avaliar montagem* para
-*identificar o prato*:
+### Como a câmera trabalha agora
 
-1. **Medição no aparelho** (`nucleo.js`) — Canvas, sem rede, sem custo por
-   foto. Reduz a imagem para 320 px com um filtro de caixa próprio (o
-   reescalonador do Canvas muda entre Chrome, WebView e Firefox e faria a mesma
-   foto medir diferente em cada aparelho), converte para CIE Lab, separa
-   prato/mesa por Otsu com tratamento de platô, preenche os vãos que a comida
-   escura abre na louça, mede o perfil radial em 48 raios e separa comida/louça
-   por croma.
-2. **8 grandezas**: `ocupacao`, `centragem`, `dispersao`, `elementos`, `borda`,
-   `luminancia`, `cromaA`, `cromaB` — todas em [0,1].
-3. **Identificação no servidor** (`afericao.js`) — afastamento de Mahalanobis
-   diagonal contra o envelope de cada prato (média e variância com encolhimento
-   para n pequeno), e cascata:
-   - **camada 0** — afastamento < 1,8 e o 2º colocado pelo menos 35% mais longe:
-     o sistema lança sozinho, sem gastar nada;
-   - **camada 1** — ambíguo ou fora da folga;
-   - **camada 2** — a foto e os candidatos da camada 1 vão para o modelo de
-     visão, que escolhe entre eles ou diz que não sabe. O veredito sai marcado
-     como **não medido** e o botão de lançar avisa "conferir antes";
-   - **camada 3** — nenhum padrão explica a foto: recusa.
-   Sobrando dúvida, a tela mostra os candidatos com os números e pede
-   confirmação na mão. Nunca chuta.
+Abra `/camera`, escolha a mesa nos botões do topo e aponte. **Não precisa
+centralizar nem tocar em nada**:
 
-   Na tela da câmera o mesmo pipeline roda **ao vivo no visor**, a cada 0,7 s,
-   dizendo se o prato está cortado, rasante, longe ou tremido — o garçom
-   enquadra antes de gastar o clique, e o botão de fotografar só fica aceso
-   quando a medição está limpa.
+1. quatro vezes por segundo, o guia lê o vídeo e desenha **o contorno do prato
+   por cima da imagem**, onde quer que ele esteja — teal lendo, latão já lido,
+   vermelho recusado;
+2. quando o prato fica parado por cerca de um segundo, o anel em volta do
+   contorno enche e a câmera **fotografa sozinha**: três quadros seguidos, e a
+   média deles (mão tremendo muda as medidas de um quadro para o outro);
+3. se a geometria tiver certeza, **conta 3 segundos e lança na mesa** — com
+   "cancelar" durante a contagem e "desfazer" depois;
+4. e **trava**: o mesmo prato parado no quadro não é lançado de novo. Destrava
+   quando o prato sai (uma mão passando na frente não conta) ou quando outro
+   prato entra no lugar.
 
-### O que o sistema recusa, e com qual número
+A lógica de quando fotografar mora em `captura.js`, separada da tela, porque é
+a parte que, errando, lança o mesmo prato duas vezes na conta de alguém. Há
+teste para cada uma dessas regras, e um teste que abre a página real da câmera
+e deixa ela achar, fotografar, reconhecer e lançar sozinha — e conferir que
+não lançou duas vezes.
 
-- prato cortado pela moldura (> 10% dos raios terminam na borda);
-- forma que não é prato: mais de 6% da área cai fora da elipse ajustada —
-  pega tábua, travessa quadrada, dois pratos encostados, mesa inteira no quadro;
-- ângulo rasante (prato mais de 2,2× mais largo que alto);
-- prato vazio (menos de 2% de comida);
-- foto sem contraste entre louça e mesa.
+Na tela ainda: lanterna (quando o aparelho deixa), troca de câmera, AUTO
+liga/desliga, foto do rolo, e a tela fica acesa enquanto a câmera está aberta.
+Espaço fotografa; `a` liga e desliga o automático.
 
-### Calibração — o que está medido e o que não está
+**Ensinar um prato** (botão ＋): escolha o prato, monte do jeito aprovado e
+aponte. A cada foto, mexa um pouco o prato — o padrão precisa aprender a
+folga. Com cinco fotos ele grava sozinho; a primeira pode ir para o cardápio.
+Se o prato novo se confunde com outro, o aviso sai na hora.
 
-`node calibra-forma.js` produz os números que sustentam os limiares de forma.
-Medido em cenas sintéticas:
+### O núcleo de medição, versão 2
 
-| cena | irregularidade | desencaixe da elipse |
+O núcleo anterior achava "a maior mancha clara" e exigia o prato inteiro no
+quadro, de cima, em louça clara sobre mesa escura. O novo:
+
+- **acha a borda, não a mancha:** ajusta uma elipse direto aos pontos do
+  contorno que aparecem (Halir & Flusser), com amostragem robusta que ignora
+  comida por cima da aba, copo encostado ou um segundo prato. Com a forma
+  reconstruída, **a parte que ficou fora do quadro deixa de importar** — o
+  ajuste acha o centro a 0,2 px com só 200° do contorno à vista;
+- **mede em coordenadas do próprio prato:** prato inclinado vira círculo antes
+  da medição, então o ângulo deixa de deformar as grandezas;
+- **usa a aba branca como referência de cor** (correção de von Kries, ganho por
+  canal no RGB linear). Se a louça estourou em dois canais, não corrige e avisa;
+- **lê tábua e travessa** (retângulo competindo com a elipse);
+- **separa o prato do fundo pela cor da moldura da foto**, então mesa clara,
+  mesa de madeira e prato escuro funcionam;
+- **qualquer resolução:** leva o lado maior a 480 px, reduzindo com filtro de
+  caixa próprio ou ampliando;
+- **sabe quando a comida saiu do quadro**, e manda ao servidor uma folga extra
+  que reduz o peso das medidas de posição — em vez de errar com confiança.
+
+Medido em cenas controladas (`node calibra-forma.js` reproduz a tabela). O
+desvio é a maior diferença entre a medição e a mesma cena bem enquadrada; a
+folga típica de um padrão fica entre 0,01 e 0,02.
+
+| caso | núcleo anterior | núcleo novo |
 |---|---|---|
-| prato de frente | 0,005 | 0,000 |
-| prato inclinado 30° | 0,050 | 0,001 |
-| prato inclinado 45° | 0,125 | 0,001 |
-| prato inclinado 60° | 0,249 | 0,001 |
-| tábua quadrada | 0,110 | **0,180** |
-| tábua hexagonal | — | **0,070** |
+| prato encostado na borda da foto (9% fora) | recusava | lê · desvio 0,000 |
+| prato bem para fora (37% fora) | recusava | lê · desvio 0,073, com folga ×2 avisada |
+| metade do prato para fora | recusava | recusa: "afaste ou centralize um pouco" |
+| inclinado ~53° | desvio 0,074 | desvio 0,001 |
+| luz fria / quente / verde | desvio 0,053 / 0,046 / 0,059 | 0,005 / 0,011 / 0,004 |
+| mesa clara | recusava | lê · desvio 0,000 |
+| tábua girada | recusava | lê como tábua |
+| dois pratos encostados, copo ao lado, toalha xadrez | — | acha o prato certo |
+| 1280×960, retrato, prato pequeno | desvio ≤ 0,007 | ≤ 0,002 |
 
-É por isso que a recusa de forma usa a elipse e não o desvio radial: o desvio
-radial de uma tábua quadrada (0,11) é **menor** que o de um prato inclinado a 45°
-(0,125) — reprovar por ele reprovaria o prato e aprovaria a tábua.
+Tempo por foto, **neste servidor**: 85 ms a medição completa e 17 ms o guia ao
+vivo. Num tablet não medi — a estimativa é duas a três vezes mais.
 
-**O que não está medido:** os limiares de identificação (1,8 / 3,2 / 1,35) são
-valores de partida escolhidos por mim, não ajustados em fotos desta casa. **Não
-existe taxa de acerto conhecida** — nem da geometria, nem da camada 2 — enquanto
-não houver fotos reais rotuladas pelo passe. Até lá o sistema trabalha, mas não
-sabe quanto erra, e é por isso que o lançamento da camada 2 sai marcado para
-conferência. Não há modelo treinado neste repositório: a camada 0 é geometria e
-cor, e a camada 2 é um modelo de propósito geral olhando a foto — nenhuma das
-duas foi ajustada para este cardápio.
+### A decisão, em camadas
+
+As 8 grandezas vão ao servidor, que calcula o afastamento de Mahalanobis
+diagonal contra o envelope de cada prato:
+- **camada 0** — afastamento < 1,8 e o 2º colocado pelo menos 35% mais longe:
+  decide sozinho, sem custo de API. É a única que lança automaticamente;
+- **camada 1** — empate: mostra os candidatos e pergunta;
+- **camada 2** — com foto e chave da API, o **recorte do prato** vai ao modelo
+  de visão, que escolhe entre os candidatos ou diz que não sabe. O veredito sai
+  marcado como não medido, e o lançamento pede confirmação;
+- **camada 3** — nenhum padrão explica a foto.
+
+**Padrões gravados com o núcleo anterior não valem mais:** as grandezas mudaram
+de definição, e o servidor não compara medição de uma versão com padrão da
+outra — diz para regravar. O painel 05 de `/sistema` mostra quantos padrões há
+de cada versão.
+
+### O que não está medido, e o que continua sem solução
+
+- **Nenhuma taxa de acerto em foto real.** Tudo acima é em cena sintética: prova
+  que o método está certo, não quanto ele acerta nos pratos da sua casa. O painel
+  05 de `/sistema` mede isso no uso — cada lançamento pela câmera junta o que o
+  sistema previu com o que o garçom lançou.
+- Os limiares de decisão (1,8 / 3,2 / 1,35) continuam valores de partida.
+- **Pratos que só diferem na altura** — burguer simples e duplo vistos de cima
+  — seguem difíceis: a foto é de cima. O aviso de gêmeos no cadastro diz quando
+  é o caso.
+- Comida branca em louça branca, e comida cobrindo a aba inteira, tiram do
+  núcleo a referência de fundo.
+- Louça de vidro ou transparente não foi testada.
+- O guia ao vivo usa o reescalonador do navegador (rápido, mas muda entre
+  aparelhos). É só guia: a foto que vira medição passa pelo caminho
+  determinístico.
 
 ## Pix
 
@@ -578,6 +741,7 @@ não funcionaria: o Chrome bloqueia antes de pedir permissão.
 | `FOCUS_NFE_AMBIENTE` | `homologacao` (padrão) ou `producao` |
 | `NFCE_AUTO` | `1` para toda conta fechada emitir NFC-e |
 | `NFCE_FUSO` | fuso da data de emissão (padrão `-03:00`) |
+| `FUSO` | fuso da casa para a noite e o gráfico por hora (padrão `-03:00`) |
 | `DIAS_EVENTO` | dias de telemetria URB1 mantidos (7) |
 
 ## Caixa: como o dinheiro entrou
@@ -622,9 +786,12 @@ aparecem junto, no canto, e repetição rápida do mesmo aviso colapsa em `×N` 
 vez de empilhar. O navegador só libera áudio depois do primeiro toque na tela —
 é por isso que o primeiro clique da noite destrava o som.
 
-**QR** (`/qr?mesa=7&area=deck&c=CÓDIGO`): cartão pronto para imprimir e
-plastificar, com o número da mesa em corpo grande, o QR nas cores da casa e
-estilo de impressão em preto no branco. O encoder é o `qrcodejs` pelo cdnjs,
+**QR** (`/qr?mesa=7&area=deck&c=CÓDIGO`): o QR leva o código **desta comanda**,
+não da mesa — ao fechar a conta, ele deixa de valer. É de propósito: um QR fixo
+na mesa deixaria quem guardou o link ver a conta dos próximos clientes. Mostre
+no tablet ao abrir a mesa, ou imprima no ticket de abertura; **não plastifique**.
+Número da mesa em corpo grande, QR nas cores da casa, estilo de impressão em
+preto no branco. O encoder é o `qrcodejs` pelo cdnjs,
 com `integrity` fixado — não escrevi encoder de QR à mão, que é risco sem
 retorno. O botão "QR desta mesa" fica na aba Comanda da gaveta.
 

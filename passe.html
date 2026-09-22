@@ -102,7 +102,11 @@
     bate(); setInterval(bate, 15000);
   }
 
-  escutar((tipo, dado) => { if (window.Alerta) Alerta.toast(tipo, dado); carregar(); });
+  const recarregar = B.adiar(carregar);
+  escutar((tipo, dado) => {
+    if (window.Alerta) Alerta.toast(tipo, dado, ['lancamento', 'pedido-aceito', 'estorno']);
+    recarregar();
+  });
   carregar();
   setInterval(carregar, 30000);   // só para os relógios andarem
 })();

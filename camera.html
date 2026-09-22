@@ -6,14 +6,14 @@
 <title>Câmera · Burguer</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wght@0,400;0,600;0,800;1,600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/burguer.css">
 </head>
-<body>
+<body class="pagina-camera">
 
 <header class="topo">
   <div class="marca">Câmera</div>
-  <div class="resumo" id="alvo"></div>
+  <div class="resumo" id="resolucao"></div>
   <div class="vaga"></div>
   <a class="btn miudo" href="/salao">voltar ao salão</a>
 </header>
@@ -26,257 +26,481 @@
   <a href="/cardapio">Cardápio</a>
 </nav>
 
-<main style="max-width:640px;margin:0 auto;padding:18px 16px 48px">
+<main class="cam">
+  <div class="chips-mesa" id="mesas" aria-label="mesa que recebe o prato"></div>
 
-  <div class="visor">
+  <div class="visor" id="visor">
     <video id="video" playsinline muted autoplay></video>
-    <canvas id="quadro" hidden></canvas>
     <img id="foto" hidden alt="">
-    <div class="mira"><i></i></div>
-    <div class="aovivo" id="aovivo"><span class="bolha">ligando a câmera…</span></div>
+    <canvas id="sobre" class="sobre"></canvas>
+    <div class="estado-cam" id="estado"><span class="bolha">ligando a câmera…</span></div>
   </div>
 
-  <div class="acoes" style="grid-template-columns:1fr 1fr;margin-top:12px">
-    <button class="btn forte" id="tirar">Fotografar o prato</button>
-    <label class="btn" style="text-align:center">Escolher do rolo
+  <div class="controles-cam">
+    <button class="ctl" id="lanterna" hidden title="lanterna" aria-label="lanterna">☀</button>
+    <button class="ctl" id="virar" title="trocar de câmera" aria-label="trocar de câmera">⟲</button>
+    <button class="ctl ctl-auto" id="auto" aria-pressed="true" title="fotografar sozinho">AUTO</button>
+    <button class="disparo" id="tirar" aria-label="fotografar agora"></button>
+    <label class="ctl" title="escolher do rolo" aria-label="escolher do rolo">▦
       <input type="file" id="arquivo" accept="image/*" hidden></label>
+    <button class="ctl" id="ensinarBtn" title="ensinar um prato" aria-label="ensinar um prato">＋</button>
   </div>
+
+  <label class="auto-lancar"><input type="checkbox" id="autoLancar">
+    lançar sozinho quando a geometria tiver certeza (com 3 s para cancelar)</label>
+
+  <section id="ensinar" class="painel" hidden>
+    <h2 data-n="E">ensinar um prato <button class="fechar" id="fecharEnsinar" aria-label="sair do modo ensinar">×</button></h2>
+    <div class="dentro">
+      <div class="campo"><label for="pratoEnsinar">Prato</label><select id="pratoEnsinar"></select></div>
+      <p class="nota" style="margin-top:0">Monte o prato do jeito aprovado e aponte a câmera. A cada foto,
+        mexa um pouco o prato — gire, empurre — para o padrão aprender a folga. Cinco fotos bastam.</p>
+      <div class="pontos" id="pontos"></div>
+      <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin:10px 0">
+        <input type="checkbox" id="fotoCardapio" checked> usar a primeira foto no cardápio (PIN de gerente)</label>
+      <button class="btn forte" id="gravarPadrao" disabled>Gravar padrão</button>
+    </div>
+  </section>
 
   <div id="saida"></div>
-
-  <details style="margin-top:28px">
-    <summary style="cursor:pointer;color:var(--papel-2);font-size:14px">Gravar o padrão de um prato</summary>
-    <p class="nota">Fotografe o mesmo prato montado do jeito aprovado, no mínimo 3 vezes, variando um
-      pouco a posição e a luz. O sistema guarda a média e a folga de cada grandeza — é isso que ele
-      usa depois para reconhecer. Quanto mais parecidas forem as fotos do padrão com as fotos do
-      serviço (mesma altura, mesma luz), melhor ele acerta.</p>
-    <div class="campo"><label for="padraoItem">Prato</label><select id="padraoItem"></select></div>
-    <div class="resumo" id="contagem">nenhuma amostra nesta sessão</div>
-    <label style="display:flex;gap:8px;align-items:center;margin-top:10px;font-size:13px">
-      <input type="checkbox" id="usarFoto" checked>
-      usar a última foto também no cardápio do cliente (precisa do PIN de gerente)</label>
-    <div class="acoes" style="margin-top:10px">
-      <button class="btn" id="juntar" disabled>Juntar esta medição</button>
-      <button class="btn forte" id="gravar" disabled>Gravar padrão</button>
-    </div>
-  </details>
 </main>
 
 <script src="/app.js"></script>
 <script src="/nucleo.js"></script>
+<script src="/captura.js"></script>
+<script src="/alerta.js"></script>
 <script>
 (function () {
   const { $, $$, esc, real, api } = B;
   const q = new URLSearchParams(location.search);
-  const mesa = q.get('mesa'), comanda = q.get('comanda');
-  let fluxo = null, ultima = null, amostras = [], cardapio = [], guia = null, ultimaFoto = null;
+  const PREF = k => `burguer.camera.${k}`;
+  const lerPref = (k, d) => { try { const v = localStorage.getItem(PREF(k)); return v == null ? d : v; } catch { return d; } };
+  const gravarPref = (k, v) => { try { localStorage.setItem(PREF(k), v); } catch {} };
 
-  $('#alvo').innerHTML = mesa
-    ? `lançando na <b>mesa ${esc(mesa)}</b>`
-    : 'sem mesa escolhida — a medição não vira lançamento';
+  let mesa = null;                       // { numero, comanda_id }
+  let abertas = [], cardapio = [];
+  let fluxo = null, trilha = null, virada = 'environment', luz = false;
+  let auto = lerPref('auto', '1') === '1';
+  let autoLancar = lerPref('autolancar', '1') === '1';
+  let zoom = null, temLanterna = false;
+  let ocupado = false, contagem = null, ensino = null, ultimoContorno = null, ultimaDecisao = null;
+  const cap = Captura.nova();
 
-  api('/api/cardapio').then(c => {
-    cardapio = c;
-    $('#padraoItem').innerHTML = c.filter(i => i.afericao)
-      .map(i => `<option value="${i.id}">${esc(i.nome)}</option>`).join('');
-  });
+  /* ─────────── mesas: para onde vai o prato ─────────── */
+  /* O que cada mesa já pediu e ainda não recebeu. É o que impede a câmera de
+     cobrar duas vezes o mesmo prato: se a mesa já tem este item esperando, o
+     caminho normal deixa de ser "lançar" e passa a ser "marcar entregue". */
+  let fila = [];
+  async function carregarFila() {
+    try { fila = (await api('/api/passe')).fila || []; } catch { fila = []; }
+  }
+  const esperando = (itemId, mesaNum) => fila.filter(f =>
+    f.item_id === itemId && f.estado !== 'entregue' && (mesaNum == null || f.mesa === mesaNum));
 
-  /* ---------- câmera ---------- */
-  async function ligarCamera() {
+  async function carregarMesas() {
     try {
-      fluxo = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }, audio: false });
-      $('#video').srcObject = fluxo;
-      $('#video').onloadeddata = () => { guia = setInterval(olhar, 700); };
+      const s = await api('/api/salao');
+      abertas = s.mesas.filter(m => m.status === 'ocupada');
+    } catch { abertas = []; }
+    const daUrl = Number(q.get('mesa'));
+    const guardada = Number(lerPref('mesa', ''));
+    const alvo = mesa?.numero ?? (daUrl || guardada || null);
+    const m = abertas.find(x => x.numero === alvo);
+    mesa = m ? { numero: m.numero, comanda_id: m.comanda_id } : null;
+    desenharMesas();
+  }
+  function desenharMesas() {
+    $('#mesas').innerHTML = `<button class="chip-mesa${!mesa ? ' aqui' : ''}" data-m="">só medir</button>` +
+      abertas.map(m => `<button class="chip-mesa${mesa?.numero === m.numero ? ' aqui' : ''}" data-m="${m.numero}">
+        mesa ${m.numero}</button>`).join('') +
+      (abertas.length ? '' : '<span class="nota" style="margin:0">nenhuma mesa aberta</span>');
+    $$('#mesas [data-m]').forEach(b => b.onclick = () => escolherMesa(Number(b.dataset.m)));
+  }
+
+  function escolherMesa(numero) {
+    const m = abertas.find(x => x.numero === numero);
+    mesa = m ? { numero: m.numero, comanda_id: m.comanda_id } : null;
+    gravarPref('mesa', mesa ? String(mesa.numero) : '');
+    desenharMesas();
+  }
+
+  /* ─────────── câmera ─────────── */
+  async function ligar() {
+    if (fluxo) fluxo.getTracks().forEach(t => t.stop());
+    try {
+      fluxo = await navigator.mediaDevices.getUserMedia({ audio: false,
+        video: { facingMode: { ideal: virada }, width: { ideal: 1920 }, height: { ideal: 1080 } } });
     } catch (e) {
       $('#video').hidden = true;
-      bolha('a câmera não abriu — use "escolher do rolo"', 'ruim');
-      mostrarAviso(`a câmera não abriu (${esc(e.name || e.message)}).`);
-    }
-  }
-  ligarCamera();
-  addEventListener('pagehide', () => {
-    clearInterval(guia);
-    if (fluxo) fluxo.getTracks().forEach(t => t.stop());
-  });
-
-  const bolha = (texto, classe = '') =>
-    $('#aovivo').innerHTML = `<span class="bolha ${classe}">${esc(texto)}</span>`;
-
-  /* guia ao vivo: a mesma medição da foto, rodando de olho no visor.
-     Serve para o garçom enquadrar antes de gastar o clique — e, quando o
-     enquadramento está bom, o botão de fotografar fica aceso. */
-  const menor = document.createElement('canvas');
-  function olhar() {
-    const v = $('#video');
-    if (!v.videoWidth || $('#foto').hidden === false) return;
-    const escala = 360 / Math.max(v.videoWidth, v.videoHeight);
-    menor.width = Math.round(v.videoWidth * escala);
-    menor.height = Math.round(v.videoHeight * escala);
-    menor.getContext('2d', { willReadFrequently: true }).drawImage(v, 0, 0, menor.width, menor.height);
-    let r;
-    try { r = Nucleo.medir(menor); } catch { return; }
-    if (r.falha) {
-      const curto = /cortado/.test(r.falha) ? 'o prato está saindo do quadro'
-        : /redonda|elipse/.test(r.falha) ? 'não vejo um prato redondo aí'
-          : /rasante/.test(r.falha) ? 'fotografe mais de cima'
-            : /vazio/.test(r.falha) ? 'prato vazio ou contra a luz'
-              : /pequena/.test(r.falha) ? 'chegue mais perto' : 'procurando o prato';
-      bolha(curto, 'ruim');
-      $('#tirar').classList.remove('forte');
+      status(`a câmera não abriu (${e.name || e.message}) — use o rolo`, 'ruim');
       return;
     }
-    const nitido = r.nitidez >= 4;
-    bolha(nitido ? `prato enquadrado · ocupação ${(r.m.ocupacao * 100).toFixed(0)}%` : 'firme a mão — está tremido',
-      nitido ? 'bom' : '');
-    $('#tirar').classList.toggle('forte', nitido);
+    const v = $('#video');
+    v.hidden = false; $('#foto').hidden = true;
+    v.srcObject = fluxo;
+    trilha = fluxo.getVideoTracks()[0];
+    const caps = trilha.getCapabilities ? trilha.getCapabilities() : {};
+    $('#lanterna').hidden = !caps.torch;
+    zoom = caps.zoom ? { ...caps.zoom, atual: trilha.getSettings().zoom || caps.zoom.min } : null;
+    temLanterna = Boolean(caps.torch);
+    /* foco contínuo, quando o aparelho deixa escolher */
+    if (caps.focusMode && caps.focusMode.includes('continuous'))
+      trilha.applyConstraints({ advanced: [{ focusMode: 'continuous' }] }).catch(() => {});
+    v.onloadedmetadata = () => {
+      $('#resolucao').innerHTML = `<span>${v.videoWidth}×${v.videoHeight}</span>`;
+    };
+    /* tela acesa enquanto a câmera está aberta */
+    try { if (navigator.wakeLock) await navigator.wakeLock.request('screen'); } catch {}
+  }
+  $('#virar').onclick = () => { virada = virada === 'environment' ? 'user' : 'environment'; ligar(); };
+  $('#lanterna').onclick = async () => {
+    luz = !luz;
+    try { await trilha.applyConstraints({ advanced: [{ torch: luz }] }); $('#lanterna').classList.toggle('ligado', luz); }
+    catch { luz = false; }
+  };
+  $('#auto').onclick = () => { auto = !auto; gravarPref('auto', auto ? '1' : '0'); marcarAuto(); };
+  const marcarAuto = () => { $('#auto').setAttribute('aria-pressed', String(auto)); $('#auto').classList.toggle('ligado', auto); };
+  $('#autoLancar').checked = autoLancar;
+  $('#autoLancar').onchange = e => { autoLancar = e.target.checked; gravarPref('autolancar', autoLancar ? '1' : '0'); };
+
+  function status(texto, classe = '') { $('#estado').innerHTML = `<span class="bolha ${classe}">${esc(texto)}</span>`; }
+
+  /* ─────────── guia ao vivo ───────────
+     4 leituras por segundo numa cópia pequena do vídeo. Aqui vale o
+     reescalonador do navegador (rápido): é só guia. A foto de verdade passa
+     pelo caminho determinístico do núcleo. */
+  const previa = document.createElement('canvas');
+  /* Enquadrar é trabalho da câmera, não do garçom: quando o prato está
+     pequeno demais ou grande demais no quadro, o zoom da própria lente
+     corrige sozinho, aos poucos, entre uma leitura e outra do guia. Alvo:
+     o prato ocupando ~62% do lado menor. Sem zoom no aparelho, nada acontece
+     e a medição continua valendo — ela lê em qualquer tamanho. */
+  const ALVO_RAIO = 0.31;
+  let ajusteEm = 0;
+  async function ajustarZoom(r, agora) {
+    if (!zoom || !trilha || ocupado || agora - ajusteEm < 900) return;
+    if (!r || r.falha || !r.raioRel) return;
+    const erro = ALVO_RAIO / r.raioRel;                 // >1 precisa aproximar
+    if (erro > 0.82 && erro < 1.22) return;             // já está bom
+    const passo = zoom.step || (zoom.max - zoom.min) / 20;
+    const alvo = Math.min(zoom.max, Math.max(zoom.min,
+      zoom.atual * Math.min(1.35, Math.max(0.74, erro))));
+    if (Math.abs(alvo - zoom.atual) < passo / 2) return;
+    ajusteEm = agora;
+    try { await trilha.applyConstraints({ advanced: [{ zoom: alvo }] }); zoom.atual = alvo; } catch { zoom = null; }
   }
 
-  $('#tirar').onclick = () => {
+  /* pouca luz e lanterna disponível: acende sozinha */
+  let escuras = 0;
+  async function ajustarLuz(r) {
+    if (!temLanterna || luz || !auto) return;
+    escuras = (r && (r.falha ? /contra a luz|escur/.test(r.falha) : r.m && r.m.luminancia < 0.28)) ? escuras + 1 : 0;
+    if (escuras < 4) return;
+    escuras = 0;
+    try { await trilha.applyConstraints({ advanced: [{ torch: true }] }); luz = true;
+      $('#lanterna').classList.add('ligado'); status('acendi a lanterna', 'bom'); } catch {}
+  }
+
+  function olhar() {
     const v = $('#video');
-    if (!v.videoWidth) return mostrarAviso('a câmera ainda não entregou imagem.');
-    const c = $('#quadro');
-    c.width = v.videoWidth; c.height = v.videoHeight;
-    c.getContext('2d').drawImage(v, 0, 0);
-    medir(c);
-  };
+    if (!document.hidden && !ocupado && !contagem && v.videoWidth && !v.hidden) {
+      const e = 320 / Math.max(v.videoWidth, v.videoHeight);
+      previa.width = Math.round(v.videoWidth * e); previa.height = Math.round(v.videoHeight * e);
+      previa.getContext('2d').drawImage(v, 0, 0, previa.width, previa.height);
+      let r;
+      try { r = Nucleo.medir(previa, { rapido: true }); } catch { r = { falha: 'sem imagem' }; }
+      const d = cap.observar(r, performance.now());
+      ultimaDecisao = d;
+      ajustarZoom(r, performance.now());
+      ajustarLuz(r);
+      desenhar(r, d);
+      mostrarEstado(r, d);
+      if (d.acao === 'capturar' && (auto || ensino)) capturar();
+    }
+    setTimeout(olhar, 250);
+  }
+
+  function mostrarEstado(r, d) {
+    const txt = {
+      procurando: ['procurando o prato — não precisa centralizar', ''],
+      recusa: [r.falha || 'não deu para ler', 'ruim'],
+      firmando: [ensino ? 'segure firme…' : auto ? 'segure firme — vou fotografar sozinho' : 'prato encontrado — toque para fotografar', 'bom'],
+      travado: ['já lido — tire o prato ou aponte o próximo', 'aviso'],
+      mexa: ['mexa um pouco o prato para a próxima foto', 'aviso'],
+      capturando: ['fotografando…', 'bom']
+    }[d.estado] || ['', ''];
+    status(txt[0], txt[1]);
+  }
+
+  /* o contorno achado, desenhado por cima do vídeo */
+  function desenhar(r, d) {
+    const c = $('#sobre'), alvo = $('#video').hidden ? $('#foto') : $('#video');
+    const dpr = window.devicePixelRatio || 1, W = alvo.clientWidth, H = alvo.clientHeight;
+    if (c.width !== Math.round(W * dpr) || c.height !== Math.round(H * dpr)) { c.width = Math.round(W * dpr); c.height = Math.round(H * dpr); }
+    const g = c.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, W, H);
+    const k = r && r.contorno;
+    if (!k) return;
+    ultimoContorno = k;
+    const cor = !d ? '#3f9e91' : d.estado === 'recusa' ? '#e30613' : d.estado === 'travado' || d.estado === 'mexa' ? '#c08a2e' : '#3f9e91';
+    g.save();
+    g.translate(k.cx * W, k.cy * H); g.rotate(k.th);
+    g.strokeStyle = cor; g.lineWidth = 3; g.setLineDash(d && d.estado === 'travado' ? [8, 6] : []);
+    g.beginPath();
+    if (k.forma === 'retangulo') g.rect(-k.ea * W, -k.eb * W, 2 * k.ea * W, 2 * k.eb * W);
+    else g.ellipse(0, 0, k.ea * W, k.eb * W, 0, 0, 2 * Math.PI);
+    g.stroke();
+    /* anel de progresso: enche enquanto o prato fica parado */
+    if (d && (d.estado === 'firmando' || d.estado === 'capturando') && (auto || ensino)) {
+      g.setLineDash([]); g.lineWidth = 6; g.strokeStyle = 'rgba(63,158,145,.9)';
+      g.beginPath();
+      const R = Math.max(k.ea, k.eb) * W + 10;
+      g.ellipse(0, 0, R, R * (k.forma === 'retangulo' ? 1 : k.eb / k.ea), 0, -Math.PI / 2, -Math.PI / 2 + 2 * Math.PI * d.progresso);
+      g.stroke();
+    }
+    g.restore();
+  }
+
+  /* ─────────── fotografar: três quadros e a média ─────────── */
+  const espera = ms => new Promise(r => setTimeout(r, ms));
+  async function capturar() {
+    if (ocupado) return;
+    const v = $('#video');
+    if (!v.videoWidth) return;
+    ocupado = true;
+    if (navigator.vibrate) navigator.vibrate(25);
+    status('fotografando…', 'bom');
+    const quadros = [];
+    for (let i = 0; i < 3; i++) {
+      const c = document.createElement('canvas');
+      c.width = v.videoWidth; c.height = v.videoHeight;
+      c.getContext('2d').drawImage(v, 0, 0);
+      quadros.push(c);
+      if (i < 2) await espera(110);
+    }
+    status('lendo…', 'bom');
+    await espera(0);
+    const medidas = [];
+    for (const qd of quadros) { medidas.push(Nucleo.medir(qd)); await espera(0); }
+    const r = Nucleo.media(medidas);
+    cap.capturou(r.contorno || ultimoContorno, performance.now());
+    await tratar(r, quadros[quadros.length - 1]);
+    ocupado = false;
+  }
+  $('#tirar').onclick = () => { cap.soltar(); capturar(); };
+  addEventListener('keydown', e => {
+    if (e.target.matches('input, select, textarea')) return;
+    if (e.key === ' ') { e.preventDefault(); $('#tirar').click(); }
+    if (e.key === 'a') $('#auto').click();
+  });
 
   $('#arquivo').onchange = e => {
     const f = e.target.files[0]; if (!f) return;
     const img = $('#foto');
-    img.onload = () => {
-      clearInterval(guia); guia = null;
+    img.onload = async () => {
       $('#video').hidden = true; img.hidden = false;
-      bolha('foto do rolo');
-      medir(img);
+      ocupado = true; status('lendo a foto…', 'bom');
+      await espera(30);
+      const r = Nucleo.medir(img);
+      desenhar(r, null);
+      await tratar(r, img);
+      ocupado = false;
     };
     img.src = URL.createObjectURL(f);
   };
 
-  /* a foto que vai para a camada 2: reduzida e comprimida aqui, para não
-     mandar 4 MB de celular novo por cima do wi-fi do bar */
-  function paraEnvio(fonte) {
-    const l = fonte.videoWidth || fonte.naturalWidth || fonte.width;
-    const a = fonte.videoHeight || fonte.naturalHeight || fonte.height;
-    const escala = Math.min(1, 900 / Math.max(l, a));
-    const c = document.createElement('canvas');
-    c.width = Math.round(l * escala); c.height = Math.round(a * escala);
-    c.getContext('2d').drawImage(fonte, 0, 0, c.width, c.height);
-    try { return c.toDataURL('image/jpeg', 0.72); } catch { return null; }
+  /* recorte do prato para a camada 2 e para o cardápio */
+  function recorte(fonte, r, lado = 640, qualidade = 0.78) {
+    const l = fonte.videoWidth || fonte.naturalWidth || fonte.width, a = fonte.videoHeight || fonte.naturalHeight || fonte.height;
+    let sx = 0, sy = 0, w = l, h = a;
+    if (r && r.contorno) {
+      const k = r.contorno, raio = Math.max(k.ea, k.eb) * l * 1.15;
+      w = h = Math.min(l, a, Math.round(raio * 2));
+      sx = Math.max(0, Math.min(l - w, Math.round(k.cx * l - w / 2)));
+      sy = Math.max(0, Math.min(a - h, Math.round(k.cy * a - h / 2)));
+    }
+    const e = Math.min(1, lado / Math.max(w, h)), c = document.createElement('canvas');
+    c.width = Math.round(w * e); c.height = Math.round(h * e);
+    c.getContext('2d').drawImage(fonte, sx, sy, w, h, 0, 0, c.width, c.height);
+    try { return c.toDataURL('image/jpeg', qualidade); } catch { return null; }
   }
 
-  /* ---------- medir e reconhecer ---------- */
-  async function medir(fonte) {
-    const t0 = performance.now();
-    let r;
-    try { r = Nucleo.medir(fonte); }
-    catch (e) { return mostrarAviso(`a medição parou: ${esc(e.message)}`); }
-    const ms = Math.round(performance.now() - t0);
-
-    if (r.falha) { ultima = null; atualizarBotoes(); return mostrarAviso(r.falha, ms); }
-    ultima = r;
-    ultimaFoto = paraEnvio(fonte);
-    atualizarBotoes();
-
-    $('#saida').innerHTML = `${barras(r.m)}<div class="veredito duvida">medindo…
-      <span class="dm">${ms} ms no aparelho · consultando os padrões</span></div>`;
-
+  async function tratar(r, fonte) {
+    if (r.falha) return mostrarFalha(r.falha);
+    if (ensino) return juntarAmostra(r, fonte);
     let id;
     try {
-      id = await api('/api/reconhecer', { method: 'POST',
-        corpo: { grandezas: r.m, mesa, foto: ultimaFoto } });
-    } catch (e) { return mostrarAviso(`medição ok, mas o servidor recusou: ${esc(e.message)}`, ms); }
-
-    desenhar(r, id, ms);
+      id = await api('/api/reconhecer', { method: 'POST', corpo: { grandezas: r.m, versao: r.versao, pesos: r.pesos,
+        inflar: r.inflar, mesa: mesa?.numero, foto: recorte(fonte, r) } });
+    } catch (e) { return mostrarFalha(`medi, mas o servidor recusou: ${e.message}`); }
+    mostrarResultado(r, id);
   }
 
-  function barras(m) {
-    return `<div class="medidas">${Nucleo.CHAVES.map(k => `
-      <div class="medida"><span>${k}</span>
-        <span class="calibre"><i style="width:${(m[k] * 100).toFixed(1)}%"></i></span>
-        <span>${m[k].toFixed(3)}</span></div>`).join('')}</div>`;
+  function mostrarFalha(texto) {
+    $('#saida').innerHTML = `<div class="veredito ruim"><b>não deu para ler</b><br>${esc(texto)}</div>`;
   }
 
-  function desenhar(r, id, ms) {
-    const classe = id.camada === 0 || id.camada === 2 ? '' : id.camada === 1 ? 'duvida' : 'ruim';
-    const candidatos = (id.candidatos || []).map(c => `${esc(c.nome)} ${c.dm.toFixed(2)}`).join('  ·  ');
-    const rotulo = { 0: 'geometria', 1: 'sem decisão', 2: 'modelo de visão', 3: 'recusado', '-1': 'medição incompleta' };
-
+  const ROT = { 0: 'geometria', 1: 'empate', 2: 'modelo de visão', 3: 'fora do cardápio', '-1': 'sem padrão' };
+  function mostrarResultado(r, id) {
+    const it = id.item_id ? cardapio.find(i => i.id === id.item_id) : null;
+    const certeza = id.camada === 0;
     $('#saida').innerHTML = `
-      ${barras(r.m)}
-      <div class="veredito ${classe}">
-        <b>camada ${id.camada} · ${rotulo[id.camada] || ''}</b><br>${esc(id.veredito)}
-        <span class="dm">${ms} ms no aparelho · nitidez ${r.nitidez} · raio ${r.raioPrato}px ·
-          desencaixe ${r.desencaixe} · razão ${r.razaoElipse}${candidatos ? ` · candidatos: ${esc(candidatos)}` : ''}</span>
-      </div>
-      ${r.ressalvas.length ? `<p class="nota">${r.ressalvas.map(esc).join(' · ')}</p>` : ''}
-      <div id="acaoLanc"></div>`;
-
-    if (!comanda) return;
-
-    if (id.item_id) {
-      const marca = id.camada === 2 ? ' (conferir antes)' : '';
-      $('#acaoLanc').innerHTML = `<div class="acoes"><button class="btn forte" id="lanc">
-        Lançar ${esc(id.nome)} — ${real(id.preco_cent)}${marca}</button></div>`;
-      $('#lanc').onclick = () => lancar(id.item_id, id.medicao_id, $('#lanc'));
-    } else {
-      const lista = (id.candidatos && id.candidatos.length ? id.candidatos
-        : cardapio.filter(i => i.afericao).map(i => ({ item_id: i.id, nome: i.nome, preco_cent: i.preco_cent })));
-      $('#acaoLanc').innerHTML = `
-        <div class="campo" style="margin-top:14px"><label for="manual">Confirme o prato na mão</label>
-          <select id="manual">${lista.map(c => {
-            const it = cardapio.find(i => i.id === c.item_id) || {};
-            return `<option value="${c.item_id}">${esc(c.nome)} — ${real(it.preco_cent ?? c.preco_cent ?? 0)}</option>`;
-          }).join('')}</select></div>
-        <button class="btn" id="lancM">Lançar o escolhido</button>`;
-      $('#lancM').onclick = () => lancar(Number($('#manual').value), id.medicao_id, $('#lancM'));
+      <div class="res-cam ${certeza ? 'certo' : id.camada === 2 ? 'duvida' : 'ruim'}">
+        <div class="res-topo">
+          <b>${it ? esc(it.nome) : id.camada === 1 ? 'Qual destes?' : 'Não reconheci'}</b>
+          ${it ? `<span class="res-preco">${real(it.preco_cent)}</span>` : ''}
+        </div>
+        <div class="res-meta">camada ${id.camada} · ${ROT[id.camada] || ''} · ${r.forma} ·
+          qualidade ${r.qualidade}${r.quadros > 1 ? ` · ${r.quadros} quadros` : ''}${r.visivel < 0.97 ? ` · ${Math.round(r.visivel * 100)}% visível` : ''}</div>
+        <p class="res-veredito">${esc(id.veredito)}</p>
+        <div class="res-acoes" id="acoes"></div>
+        ${r.ressalvas.length ? `<p class="nota">${r.ressalvas.map(esc).join(' · ')}</p>` : ''}
+        <details class="res-medidas"><summary>medidas</summary><div class="medidas">${Nucleo.CHAVES.map(k => `
+          <div class="medida"><span>${k}</span><span class="calibre"><i style="width:${(r.m[k] * 100).toFixed(1)}%"></i></span>
+          <span>${r.m[k].toFixed(3)}</span></div>`).join('')}</div></details>
+      </div>`;
+    if (!mesa) {
+      /* ninguém escolheu a mesa: se só uma mesa espera este prato, ela se
+         oferece — um toque em vez de procurar o número na lista */
+      const pendentes = it ? esperando(it.id, null) : [];
+      const mesas = [...new Set(pendentes.map(p => p.mesa))];
+      $('#acoes').innerHTML = mesas.length
+        ? mesas.slice(0, 3).map(n => `<button class="btn ${mesas.length === 1 ? 'forte' : ''}" data-mesa-sugerida="${n}">
+            mesa ${n} está esperando este prato</button>`).join('')
+        : '<span class="nota" style="margin:0">escolha uma mesa acima para lançar</span>';
+      $$('#acoes [data-mesa-sugerida]').forEach(b => b.onclick = () => {
+        escolherMesa(Number(b.dataset.mesaSugerida)); mostrarResultado(r, id);
+      });
+      return;
     }
+    if (it) {
+      const pendentes = esperando(it.id, mesa.numero);
+      if (pendentes.length) {
+        /* já está na conta: lançar de novo cobraria duas vezes */
+        const p = pendentes[0];
+        $('#acoes').innerHTML = `<button class="btn forte" id="entregar">marcar entregue na mesa ${mesa.numero}</button>
+          <button class="btn" id="lancarMesmo">lançar outro (cobra de novo)</button>`;
+        $('#saida').querySelector('.res-veredito').insertAdjacentHTML('afterend',
+          `<p class="nota" style="margin:6px 0 0">a mesa ${mesa.numero} já tem <b>${esc(it.nome)}</b> ${esc(p.estado)} — lançar de novo cobraria duas vezes</p>`);
+        $('#entregar').onclick = async b => {
+          const botao = $('#entregar'); botao.disabled = true;
+          try {
+            await api(`/api/lancamentos/${p.id}/estado`, { method: 'POST', corpo: { estado: 'entregue' } });
+            await carregarFila();
+            $('#acoes').innerHTML = `<div class="veredito">entregue na mesa ${mesa.numero}.</div>`;
+            if (window.Alerta) Alerta.toast('item-entregue', { mesa: mesa.numero, nome: it.nome });
+          } catch (e) { botao.disabled = false; mostrarFalha(e.message); }
+        };
+        $('#lancarMesmo').onclick = () => contar(it, id);
+        return;
+      }
+    }
+    if (certeza && it && autoLancar) return contar(it, id);
+    const opcoes = (id.candidatos && id.candidatos.length ? id.candidatos.map(c => c.item_id) : cardapio.filter(i => i.afericao).map(i => i.id))
+      .map(i => cardapio.find(x => x.id === i)).filter(Boolean);
+    const primeiro = it ? [it, ...opcoes.filter(o => o.id !== it.id)] : opcoes;
+    $('#acoes').innerHTML = primeiro.slice(0, 4).map((o, k) => `<button class="btn ${k === 0 && it ? 'forte' : ''}" data-lanca="${o.id}">
+      ${esc(o.nome)} → mesa ${mesa.numero}</button>`).join('');
+    $$('#acoes [data-lanca]').forEach(b => b.onclick = () => lancar(Number(b.dataset.lanca), id.medicao_id, b));
+  }
+
+  /* certeza da geometria: lança sozinho depois de 3 s, a não ser que cancelem */
+  function contar(it, id) {
+    let s = 3;
+    const pintar = () => { $('#acoes').innerHTML = `<div class="contagem"><span>lançando <b>${esc(it.nome)}</b> na mesa ${mesa.numero} em <b>${s}</b></span>
+      <button class="btn" id="cancelar">cancelar</button></div>`;
+      $('#cancelar').onclick = () => { clearInterval(contagem); contagem = null;
+        $('#acoes').innerHTML = `<button class="btn forte" data-lanca="${it.id}">lançar ${esc(it.nome)} → mesa ${mesa.numero}</button>`;
+        $('#acoes [data-lanca]').onclick = e => lancar(it.id, id.medicao_id, e.target); }; };
+    pintar();
+    contagem = setInterval(() => {
+      s--;
+      if (s > 0) return pintar();
+      clearInterval(contagem); contagem = null;
+      lancar(it.id, id.medicao_id, null);
+    }, 1000);
   }
 
   async function lancar(itemId, medicaoId, botao) {
-    botao.disabled = true;
+    carregarFila();
+    if (!mesa) return;
+    if (botao) botao.disabled = true;
     try {
-      await api(`/api/comandas/${comanda}/itens`, { method: 'POST',
+      const r = await api(`/api/comandas/${mesa.comanda_id}/itens`, { method: 'POST',
         corpo: { item_id: itemId, qtd: 1, origem: 'camera', medicao_id: medicaoId } });
-      botao.textContent = `lançado na mesa ${mesa}`;
-      setTimeout(() => location.href = '/salao', 900);
-    } catch (e) { botao.disabled = false; mostrarAviso(e.message); }
+      const it = cardapio.find(i => i.id === itemId);
+      $('#acoes').innerHTML = `<div class="contagem feito"><span>lançado: <b>${esc(it?.nome || '')}</b> na mesa ${mesa.numero}</span>
+        <button class="btn" id="desfazer">desfazer</button></div>`;
+      if (navigator.vibrate) navigator.vibrate([15, 60, 15]);
+      $('#desfazer').onclick = async () => {
+        try { await api(`/api/lancamentos/${r.lancamento_id}`, { method: 'DELETE' }); $('#acoes').innerHTML = '<span class="nota" style="margin:0">desfeito</span>'; }
+        catch (e) { mostrarFalha(e.message); }
+      };
+    } catch (e) {
+      if (botao) botao.disabled = false;
+      mostrarFalha(e.message);
+      carregarMesas();
+    }
   }
 
-  function mostrarAviso(texto, ms) {
-    $('#saida').innerHTML = `<div class="veredito ruim">${esc(texto)}
-      ${ms ? `<span class="dm">a foto foi processada em ${ms} ms — a recusa é da medição, não da rede</span>` : ''}</div>`;
+  /* ─────────── ensinar um prato ─────────── */
+  function abrirEnsino() {
+    $('#ensinar').hidden = false;
+    ensino = { amostras: [], foto: null };
+    cap.modoEnsinar(true);
+    desenharPontos();
+    $('#saida').innerHTML = '';
   }
-
-  /* ---------- padrões ---------- */
-  function atualizarBotoes() {
-    $('#juntar').disabled = !ultima;
-    $('#gravar').disabled = amostras.length < 3;
-    $('#contagem').textContent = amostras.length
-      ? `${amostras.length} amostra${amostras.length > 1 ? 's' : ''} juntada${amostras.length > 1 ? 's' : ''} nesta sessão`
-      : 'nenhuma amostra nesta sessão';
+  function fecharEnsino() { $('#ensinar').hidden = true; ensino = null; cap.modoEnsinar(false); }
+  $('#ensinarBtn').onclick = () => (ensino ? fecharEnsino() : abrirEnsino());
+  $('#fecharEnsinar').onclick = fecharEnsino;
+  function desenharPontos() {
+    const n = ensino ? ensino.amostras.length : 0;
+    $('#pontos').innerHTML = Array.from({ length: 5 }, (_, k) => `<i class="${k < n ? 'cheio' : ''}"></i>`).join('') +
+      `<span>${n} de 5</span>`;
+    $('#gravarPadrao').disabled = n < 3;
+    $('#gravarPadrao').textContent = n < 3 ? `Gravar padrão (mínimo 3)` : `Gravar padrão com ${n} fotos`;
   }
-  $('#juntar').onclick = () => { if (ultima) { amostras.push(ultima.m); ultima = null; atualizarBotoes(); } };
-  $('#gravar').onclick = async () => {
+  function juntarAmostra(r, fonte) {
+    ensino.amostras.push(r.m);
+    if (!ensino.foto) ensino.foto = recorte(fonte, r, 720, 0.84);
+    desenharPontos();
+    if (ensino.amostras.length >= 5) gravarPadrao();
+  }
+  async function gravarPadrao() {
+    if (!ensino || ensino.amostras.length < 3) return;
+    const itemId = Number($('#pratoEnsinar').value);
+    const nome = cardapio.find(i => i.id === itemId)?.nome || '';
     try {
-      const r = await api('/api/padroes', { method: 'POST',
-        corpo: { item_id: Number($('#padraoItem').value), amostras } });
-      amostras = []; atualizarBotoes();
-      let sobreFoto = '';
-      /* a mesma foto que ensina o reconhecimento vira a foto do cardápio:
-         é o prato de verdade, montado do jeito aprovado, fotografado na casa */
-      if ($('#usarFoto').checked && ultimaFoto) {
-        try {
-          await api(`/api/cardapio/${Number($('#padraoItem').value)}/foto`, { method: 'PUT',
-            corpo: { imagem: ultimaFoto } });
-          sobreFoto = ' · a foto também foi para o cardápio';
-        } catch (e) { sobreFoto = ` · a foto não foi para o cardápio: ${esc(e.message)}`; }
+      const r = await api('/api/padroes', { method: 'POST', corpo: { item_id: itemId, amostras: ensino.amostras, versao: Nucleo.VERSAO } });
+      let foto = '';
+      if ($('#fotoCardapio').checked && ensino.foto) {
+        try { await api(`/api/cardapio/${itemId}/foto`, { method: 'PUT', corpo: { imagem: ensino.foto } }); foto = ' · a foto foi para o cardápio'; }
+        catch (e) { foto = ` · a foto não foi para o cardápio: ${e.message}`; }
       }
-      $('#saida').innerHTML = `<div class="veredito">padrão de ${esc(r.item)} gravado com ${r.n} amostras.
-        <span class="dm">o reconhecimento passa a considerar este prato${sobreFoto}</span></div>`;
-    } catch (e) { mostrarAviso(e.message); }
-  };
-  atualizarBotoes();
+      $('#saida').innerHTML = `<div class="veredito"><b>padrão gravado</b><br>${esc(nome)}, com ${r.n} fotos${esc(foto)}</div>` +
+        (r.gemeos || []).map(g => `<div class="veredito ${g.nivel === 'indistinguivel' ? 'ruim' : 'duvida'}">
+          ${g.nivel === 'indistinguivel' ? 'Pela foto, este prato e' : 'Pode ser confundido com'} <b style="text-transform:none;letter-spacing:0">${esc(g.item)}</b>
+          <span class="dm">afastamento ${g.dm} — ${g.nivel === 'indistinguivel' ? 'o sistema vai sempre pedir confirmação' : 'no empate, ele pergunta'}</span></div>`).join('');
+      fecharEnsino();
+    } catch (e) { mostrarFalha(e.message); }
+  }
+  $('#gravarPadrao').onclick = gravarPadrao;
+
+  /* ─────────── partida ─────────── */
+  marcarAuto();
+  api('/api/cardapio').then(c => {
+    cardapio = c;
+    $('#pratoEnsinar').innerHTML = c.filter(i => i.afericao).map(i => `<option value="${i.id}">${esc(i.nome)}</option>`).join('');
+  }).catch(() => {});
+  carregarMesas();
+  carregarFila();
+  setInterval(carregarMesas, 30000);
+  setInterval(carregarFila, 20000);
+  ligar().then(() => setTimeout(olhar, 400));
+  addEventListener('pagehide', () => { if (fluxo) fluxo.getTracks().forEach(t => t.stop()); });
+  addEventListener('resize', () => { if (ultimoContorno) desenhar({ contorno: ultimoContorno }, ultimaDecisao); });
 })();
 </script>
 </body>

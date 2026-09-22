@@ -834,8 +834,8 @@ Responda SEMPRE um único objeto JSON, sem cerca de código:
         <i style="width:${(r.m[k] * 100).toFixed(1)}%"></i></span>
         <span>${r.m[k].toFixed(3)}</span></div>`).join('')}</div>
       <div class="veredito ${classe}"><b>camada ${id.camada} · ${rot[id.camada] || ''}</b><br>${esc(id.veredito)}
-        <span class="dm">${ms} ms no aparelho · nitidez ${r.nitidez} · desencaixe ${r.desencaixe} ·
-          razão ${r.razaoElipse}${cands ? ` · candidatos: ${cands}` : ''}</span></div>
+        <span class="dm">${ms} ms no aparelho · ${r.forma} · qualidade ${r.qualidade} ·
+          ${Math.round((r.visivel ?? 1) * 100)}% visível${cands ? ` · candidatos: ${cands}` : ''}</span></div>
       ${r.ressalvas.length ? `<p class="nota">${r.ressalvas.map(esc).join(' · ')}</p>` : ''}
       <div id="acao"></div>`;
 

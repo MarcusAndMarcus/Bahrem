@@ -43,7 +43,8 @@ const INTERFACE = {
   'app.js': 'text/javascript; charset=utf-8',
   'nucleo.js': 'text/javascript; charset=utf-8',
   'alerta.js': 'text/javascript; charset=utf-8',
-  'caixinha.js': 'text/javascript; charset=utf-8'
+  'caixinha.js': 'text/javascript; charset=utf-8',
+  'captura.js': 'text/javascript; charset=utf-8'
 };
 const IMAGENS = { 'casa.jpg': 'image/jpeg' };
 

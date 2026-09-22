@@ -15,7 +15,7 @@ const persistencia = require('./persistencia');
 const assistente = require('./assistente');
 const conta = require('./conta');
 const fiscal = require('./fiscal');
-const { identificar, envelope } = require('./afericao');
+const { identificar, envelope, afastamento, LIM_OK, LIM_REJ, SEP_MIN } = require('./afericao');
 
 const PORTA = Number(process.env.PORT) || 3000;
 const CASA = {
@@ -146,7 +146,11 @@ function emitir(tipo, mesa, carga = {}, telegrama = null) {
     [carga.total_cent ? Math.round(carga.total_cent / 100) : 0]);
   db.prepare('INSERT INTO eventos (tipo, mesa, carga, urb1, criado_em) VALUES (?,?,?,?,?)')
     .run(tipo, mesa ?? null, JSON.stringify(carga), quadro, agora());
-  const linha = `event: ${tipo}\ndata: ${JSON.stringify({ tipo, mesa, ...carga, urb1: quadro })}\n\n`;
+  /* Sem "event:" nomeado: tudo vai pelo canal padrão, e o tipo segue dentro
+     do dado. Com nome, o navegador só entrega o evento a quem escuta aquele
+     nome exato — e a lista das telas tinha 9 nomes para 17 tipos emitidos:
+     pedido do celular, item pronto, transferência e nota nunca chegavam. */
+  const linha = `data: ${JSON.stringify({ tipo, mesa, ...carga, urb1: quadro })}\n\n`;
   for (const res of ouvintes) { try { res.write(linha); } catch { ouvintes.delete(res); } }
   persistencia.marcar(db); // todo estado que muda passa por aqui
 }
@@ -155,6 +159,24 @@ function emitir(tipo, mesa, carga = {}, telegrama = null) {
    (e chamada de API sem pagamento) precisa cair em algum lugar visível, em vez
    de sumir dentro do total como se fosse dinheiro. */
 const FORMAS = ['dinheiro', 'pix', 'credito', 'debito', 'voucher', 'nao-informado'];
+
+/* ─────────────────────────── fuso ───────────────────────────
+   O servidor pode estar em UTC (o comum em nuvem) ou em qualquer outro fuso;
+   a noite do bar é em Brasília. Todo cálculo de hora da noite passa por aqui,
+   só com métodos UTC — o fuso do servidor deixa de importar. */
+const FUSO_MIN = (() => {
+  const m = /^([+-])(\d{2}):(\d{2})$/.exec(process.env.FUSO || process.env.NFCE_FUSO || '-03:00');
+  return m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : -180;
+})();
+const horaLocal = iso => new Date(Date.parse(iso) + FUSO_MIN * 60000).getUTCHours();
+
+/** início da "noite" corrente: o bar vira às NOITE_INICIO horas de Brasília */
+function inicioDaNoite(agora = Date.now(), corte = Number(process.env.NOITE_INICIO ?? 12)) {
+  const local = new Date(agora + FUSO_MIN * 60000);          // relógio de parede, lido em UTC
+  if (local.getUTCHours() < corte) local.setUTCDate(local.getUTCDate() - 1);
+  local.setUTCHours(corte, 0, 0, 0);
+  return new Date(local.getTime() - FUSO_MIN * 60000);        // de volta ao instante real
+}
 
 /* ─────────────────────────── contas ─────────────────────────── */
 const dinheiro = c => (c / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 });
@@ -179,6 +201,17 @@ function totais(comandaId) {
     servicoPct: c.servico_pct, descontoCent: c.desconto_cent });
   return { itens, ...soma, comanda: c, nomes: nomesDe(c),
     desconto_motivo: c.desconto_motivo || null };
+}
+
+/* quem dividiu cada item — usada pela rota da equipe e pela do cliente */
+function aplicarDivisao(l, c, pessoas) {
+  const validas = [...new Set((Array.isArray(pessoas) ? pessoas : []).map(Number))]
+    .filter(p => Number.isInteger(p) && p >= 1 && p <= c.pessoas);
+  db.prepare('DELETE FROM divisao WHERE lancamento_id=?').run(l.id);
+  for (const p of validas) db.prepare('INSERT INTO divisao (lancamento_id, pessoa) VALUES (?,?)').run(l.id, p);
+  const mesa = db.prepare('SELECT numero FROM mesas WHERE id=?').get(c.mesa_id);
+  emitir('divisao', mesa.numero, { lancamento_id: l.id, pessoas: validas.length });
+  return validas;
 }
 
 /* nomes das pessoas da mesa, quando alguém se deu ao trabalho de digitar */
@@ -335,7 +368,7 @@ async function emitirNota(comandaId, { cpf = '', por = null } = {}) {
 const PUBLICOS = new Set([
   'index.html', 'salao.html', 'mesa.html', 'passe.html', 'camera.html',
   'noite.html', 'qr.html', 'cardapio.html', 'cupom.html', 'sistema.html',
-  'burguer.css', 'app.js', 'nucleo.js', 'alerta.js', 'caixinha.js',
+  'burguer.css', 'app.js', 'nucleo.js', 'alerta.js', 'caixinha.js', 'captura.js',
   'casa.jpg'
 ]);
 
@@ -486,9 +519,31 @@ const servidor = http.createServer(async (req, res) => {
       if (!c) return json(res, 404, { erro: 'comanda não está aberta' });
       const mesa = db.prepare('SELECT numero FROM mesas WHERE id = ?').get(c.mesa_id);
       const t = tipo === 'conta' ? 'pediu-conta' : 'chamou-garcom';
+      /* sem isto, um dedo nervoso (ou um script) fazia o tablet do salão
+         apitar sem parar */
+      const ultima = db.prepare(`SELECT criado_em FROM eventos WHERE mesa=? AND tipo=?
+        ORDER BY id DESC LIMIT 1`).get(mesa.numero, t);
+      if (ultima && Date.now() - Date.parse(ultima.criado_em) < 30000)
+        return json(res, 429, { erro: 'o garçom já foi avisado — um instante' });
+      /* o rótulo URB1 compara o PEDIDO ('conta'), não o tipo do evento: antes
+         comparava t === 'conta', que nunca é verdade, e "pediu a conta" saía
+         no barramento como chamada de garçom */
       emitir(t, mesa.numero, { comanda_id: c.id },
-        urb1.telegrama('CLI', t === 'conta' ? 'CONT' : 'GARC', mesa.numero));
+        urb1.telegrama('CLI', tipo === 'conta' ? 'CONT' : 'GARC', mesa.numero));
       return json(res, 200, { ok: true, tipo: t });
+    }
+
+    /* O cliente marca quem dividiu cada item, pela tela dele. Antes a tela
+       chamava a rota da equipe: 401, e o 401 mandava o cliente para o PIN. */
+    if (m === 'PUT' && /^\/api\/conta\/[^/]+\/divisao\/\d+$/.test(rota)) {
+      const [, , , codTxt, , idTxt] = rota.split('/');
+      const c = db.prepare(`SELECT * FROM comandas WHERE codigo=? AND status='aberta'`)
+        .get(decodeURIComponent(codTxt).toUpperCase());
+      if (!c) return json(res, 404, { erro: 'comanda não está aberta' });
+      const l = db.prepare('SELECT * FROM lancamentos WHERE id=? AND comanda_id=?').get(Number(idTxt), c.id);
+      if (!l) return json(res, 404, { erro: 'este item não é desta conta' });
+      const { pessoas } = await corpo(req);
+      return json(res, 200, { ok: true, pessoas: aplicarDivisao(l, c, pessoas) });
     }
 
     /* a nota do cliente, pelo código da comanda — é o que o cupom mostra */
@@ -722,13 +777,7 @@ const servidor = http.createServer(async (req, res) => {
       if (!l) return json(res, 404, { erro: 'lançamento não existe' });
       const c = db.prepare('SELECT * FROM comandas WHERE id=?').get(l.comanda_id);
       if (c.status !== 'aberta') return json(res, 409, { erro: 'comanda já fechada' });
-      const validas = [...new Set((Array.isArray(pessoas) ? pessoas : []).map(Number))]
-        .filter(p => Number.isInteger(p) && p >= 1 && p <= c.pessoas);
-      db.prepare('DELETE FROM divisao WHERE lancamento_id=?').run(id);
-      for (const p of validas) db.prepare('INSERT INTO divisao (lancamento_id, pessoa) VALUES (?,?)').run(id, p);
-      const mesa = db.prepare('SELECT numero FROM mesas WHERE id=?').get(c.mesa_id);
-      emitir('divisao', mesa.numero, { lancamento_id: id, pessoas: validas.length });
-      return json(res, 200, { ok: true, pessoas: validas });
+      return json(res, 200, { ok: true, pessoas: aplicarDivisao(l, c, pessoas) });
     }
 
     /* quantas pessoas, e como se chamam — muda o rateio inteiro */
@@ -1012,29 +1061,46 @@ const servidor = http.createServer(async (req, res) => {
     }
 
     if (m === 'POST' && rota === '/api/padroes') {
-      const { item_id, amostras } = await corpo(req);
+      const { item_id, amostras, versao: vPadrao } = await corpo(req);
+      /* a versão vem do núcleo que mediu, sem lista fixa aqui: antes estava
+         escrito "=== 2 ? 2 : 1", e a v3 gravava como v1 — os padrões novos
+         nunca seriam comparados com as medições novas */
+      const versaoPadrao = Math.min(99, Math.max(1, Math.round(Number(vPadrao) || 1)));
       const it = db.prepare('SELECT * FROM cardapio WHERE id=?').get(Number(item_id));
       if (!it) return json(res, 404, { erro: 'item fora do cardápio' });
       if (!Array.isArray(amostras) || amostras.length < 3)
         return json(res, 400, { erro: 'precisa de pelo menos 3 fotos do prato aprovado' });
       const env = envelope(amostras);
-      db.prepare(`INSERT INTO padroes (item_id, n, mu, sigma, atualizado_em)
-        VALUES (?,?,?,?,?) ON CONFLICT(item_id) DO UPDATE SET
-        n=excluded.n, mu=excluded.mu, sigma=excluded.sigma, atualizado_em=excluded.atualizado_em`)
-        .run(it.id, amostras.length, JSON.stringify(env.mu), JSON.stringify(env.sigma), agora());
+      db.prepare(`INSERT INTO padroes (item_id, n, mu, sigma, atualizado_em, versao)
+        VALUES (?,?,?,?,?,?) ON CONFLICT(item_id) DO UPDATE SET
+        n=excluded.n, mu=excluded.mu, sigma=excluded.sigma, atualizado_em=excluded.atualizado_em,
+        versao=excluded.versao`)
+        .run(it.id, amostras.length, JSON.stringify(env.mu), JSON.stringify(env.sigma), agora(), versaoPadrao);
       emitir('padrao-gravado', null, { item: it.nome, n: amostras.length });
-      return json(res, 200, { item: it.nome, n: amostras.length, mu: env.mu, sigma: env.sigma });
+
+      /* Pratos gêmeos: se a foto típica deste prato cai dentro do envelope de
+         outro (ou o contrário), a geometria não vai separar os dois. Melhor
+         saber agora, no cadastro, do que descobrir na conta de um cliente. */
+      const gemeos = db.prepare(
+        `SELECT p.item_id, p.mu, p.sigma, c.nome FROM padroes p JOIN cardapio c ON c.id=p.item_id
+          WHERE p.item_id <> ? AND p.versao = ?`).all(it.id, versaoPadrao).map(o => {
+          const outro = { mu: JSON.parse(o.mu), sigma: JSON.parse(o.sigma) };
+          const dm = Math.min(afastamento(env.mu, outro).dm, afastamento(outro.mu, env).dm);
+          return { item: o.nome, dm: Number(dm.toFixed(2)),
+            nivel: dm < LIM_OK ? 'indistinguivel' : dm < LIM_REJ ? 'proximo' : null };
+        }).filter(g => g.nivel).sort((a, b) => a.dm - b.dm);
+      return json(res, 200, { item: it.nome, n: amostras.length, versao: versaoPadrao, mu: env.mu, sigma: env.sigma, gemeos });
     }
 
     if (m === 'POST' && rota === '/api/reconhecer') {
-      const { grandezas, mesa, foto } = await corpo(req);
+      const { grandezas, mesa, foto, versao, inflar, pesos } = await corpo(req);
       if (!grandezas || typeof grandezas !== 'object')
         return json(res, 400, { erro: 'sem vetor de grandezas' });
       const padroes = db.prepare(
-        `SELECT p.item_id, p.n, p.mu, p.sigma, c.nome, c.preco_cent, c.estacao
+        `SELECT p.item_id, p.n, p.mu, p.sigma, p.versao, c.nome, c.preco_cent, c.estacao
            FROM padroes p JOIN cardapio c ON c.id=p.item_id WHERE c.ativo=1`).all()
         .map(p => ({ ...p, mu: JSON.parse(p.mu), sigma: JSON.parse(p.sigma) }));
-      let r = identificar(grandezas, padroes);
+      let r = identificar(grandezas, padroes, { versao, inflar, pesos });
 
       /* Camada 2: a geometria empatou, e há foto e chave. Só aqui se gasta
          chamada de API — quando a medição sozinha não resolveu. O modelo
@@ -1077,13 +1143,6 @@ const servidor = http.createServer(async (req, res) => {
     /* ---------- a noite ---------- */
     /* A "noite" de um bar não é o dia do calendário: ela começa à tarde e
        termina de madrugada. NOITE_INICIO (hora local) marca a virada. */
-    function inicioDaNoite() {
-      const corte = Number(process.env.NOITE_INICIO ?? 12);
-      const d = new Date();
-      if (d.getHours() < corte) d.setDate(d.getDate() - 1);
-      d.setHours(corte, 0, 0, 0);
-      return d;
-    }
 
     if (m === 'GET' && rota === '/api/noite') {
       const inicio = inicioDaNoite();
@@ -1115,13 +1174,13 @@ const servidor = http.createServer(async (req, res) => {
       /* receita por hora, pela hora local de cada lançamento */
       const porHoraMapa = new Map();
       for (const i of itens) {
-        const hora = new Date(i.criado_em).getHours();
+        const hora = horaLocal(i.criado_em);
         porHoraMapa.set(hora, (porHoraMapa.get(hora) || 0) + i.qtd * i.preco_cent);
       }
       const porHora = [...porHoraMapa.entries()]
         .map(([hora, total_cent]) => ({ hora, total_cent }))
-        .sort((a, b) => (a.hora < inicio.getHours() ? a.hora + 24 : a.hora) -
-          (b.hora < inicio.getHours() ? b.hora + 24 : b.hora));
+        .sort((a, b) => (a.hora < horaLocal(inicio.toISOString()) ? a.hora + 24 : a.hora) -
+          (b.hora < horaLocal(inicio.toISOString()) ? b.hora + 24 : b.hora));
 
       const topMapa = new Map();
       for (const i of itens) {
@@ -1174,7 +1233,10 @@ const servidor = http.createServer(async (req, res) => {
         inicio: desde, subtotal_cent: subtotal, servico_cent: servico,
         desconto_cent: desconto, total_cent: total,
         comandas: fechadas.n, cobertas, lancamentos: itens.length,
-        ticket_cent: fechadas.n ? Math.round(total / Math.max(1, idsComanda.length)) : 0,
+        /* ticket = o que entrou ÷ as comandas que fecharam. Antes dividia o
+           total de TODAS as comandas tocadas (abertas inclusive) pelo número
+           delas, e mostrava ao lado o número só das fechadas. */
+        ticket_cent: fechadas.n ? Math.round(recebido / fechadas.n) : 0,
         porHora, topItens, porForma,
         caixa: {
           recebido_cent: recebido,
@@ -1262,6 +1324,44 @@ const servidor = http.createServer(async (req, res) => {
           : 'a foto ficou no servidor, mas não subiu para o repositório — some no próximo restart' });
     }
 
+    /* ---------- quanto o reconhecimento acerta, medido no uso ----------
+       O par já estava no banco: cada medição guarda o prato que o sistema
+       previu, e o lançamento feito pela câmera aponta para ela com o prato que
+       o garçom de fato lançou. Isto só junta os dois. */
+    if (m === 'GET' && rota === '/api/afericao/relatorio') {
+      if (s.papel !== 'gerente') return json(res, 403, { erro: 'só o gerente vê o relatório' });
+      const linhas = db.prepare(
+        `SELECT m.camada, m.item_id previsto, l.item_id lancado, l.estornado_em,
+                cp.nome nome_previsto, cl.nome nome_lancado
+           FROM lancamentos l JOIN medicoes m ON m.id = l.medicao_id
+           LEFT JOIN cardapio cp ON cp.id = m.item_id LEFT JOIN cardapio cl ON cl.id = l.item_id
+          WHERE l.origem = 'camera'`).all();
+      const camada = k => {
+        const d = linhas.filter(x => x.camada === k);
+        const certos = d.filter(x => x.previsto != null && x.previsto === x.lancado && !x.estornado_em).length;
+        return { n: d.length, acertos: certos, taxa: d.length ? Number((certos / d.length).toFixed(3)) : null };
+      };
+      const conf = new Map();
+      for (const x of linhas) {
+        if (x.previsto == null || x.previsto === x.lancado) continue;
+        const chave = `${x.nome_previsto} → ${x.nome_lancado}`;
+        conf.set(chave, (conf.get(chave) || 0) + 1);
+      }
+      return json(res, 200, {
+        confirmadas: linhas.length,
+        geometria: camada(0), modeloVisao: camada(2),
+        decididasNaMao: linhas.filter(x => x.camada === 1).length,
+        estornadasDepois: linhas.filter(x => x.estornado_em).length,
+        medicoesSemLancamento: db.prepare(
+          `SELECT COUNT(*) n FROM medicoes m WHERE NOT EXISTS (SELECT 1 FROM lancamentos l WHERE l.medicao_id = m.id)`).get().n,
+        confusoes: [...conf.entries()].map(([par, n]) => ({ par, n })).sort((a, b) => b.n - a.n).slice(0, 10),
+        limiares: { LIM_OK, LIM_REJ, SEP_MIN },
+        padroesPorVersao: Object.fromEntries(db.prepare(
+          'SELECT versao, COUNT(*) n FROM padroes GROUP BY versao').all().map(x => [`v${x.versao}`, x.n])),
+        suficiente: linhas.length >= 30
+      });
+    }
+
     /* ---------- passe / KDS ---------- */
     if (m === 'GET' && rota === '/api/passe') {
       const linhas = db.prepare(
@@ -1289,4 +1389,5 @@ if (require.main === module) {
   }));
 }
 
-module.exports = { servidor, preparar, totais, salao, emitir, CASA, banco: () => db };
+module.exports = { servidor, preparar, totais, salao, emitir, CASA, banco: () => db,
+  inicioDaNoite, horaLocal };

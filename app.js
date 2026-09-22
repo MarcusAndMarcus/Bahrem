@@ -53,14 +53,23 @@
         fonte.close();
         setTimeout(ligar, Math.min(15000, 800 * 2 ** tentativa++));
       };
-      for (const t of ['mesa-aberta', 'lancamento', 'estorno', 'mesa-fechada',
-        'chamou-garcom', 'pediu-conta', 'afericao', 'passe-pronto', 'padrao-gravado']) {
-        fonte.addEventListener(t, e => { try { aoReceber(t, JSON.parse(e.data)); } catch {} });
-      }
+      /* canal único: o tipo vem dentro do dado. Uma lista de nomes aqui
+         sempre fica para trás do servidor — foi o que aconteceu, e 8 dos 17
+         tipos de evento nunca chegavam às telas. */
+      fonte.onmessage = e => {
+        let d; try { d = JSON.parse(e.data); } catch { return; }
+        if (d && d.tipo) aoReceber(d.tipo, d);
+      };
     };
     ligar();
     return () => fonte && fonte.close();
   }
 
-  w.B = { $, $$, esc, real, decorrido, api, guarda, escutar };
+  /* junta rajadas: dez eventos em sequência viram uma recarga só */
+  function adiar(fn, ms = 250) {
+    let t = null;
+    return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+  }
+
+  w.B = { $, $$, esc, real, decorrido, api, guarda, escutar, adiar };
 })(window);

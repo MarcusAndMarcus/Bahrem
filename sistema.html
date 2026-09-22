@@ -37,8 +37,8 @@
      teste fiscal consulta a Focus NFe sem emitir nota nenhuma. Verde aqui
      significa "a outra ponta respondeu", não "está configurado". */
   async function carregar() {
-    let s;
-    try { s = await api('/api/sistema'); }
+    let s, rec = null;
+    try { s = await api('/api/sistema'); rec = await api('/api/afericao/relatorio').catch(() => null); }
     catch (e) { $('#sistema').innerHTML = `<p class="vazio">${esc(e.message)}</p>`; return; }
 
     const cartao = (n, titulo, estado, linhas, teste) => `
@@ -77,7 +77,16 @@
       cartao('04', 'Sessão e Pix', s.sessao.segredoFixo && s.pix.chave ? 'verde' : 'amarela', [
         ['sessão', s.sessao.segredoFixo ? 'sobrevive ao restart' : '<em>SESSAO_SEGREDO ausente — restart desloga</em>'],
         ['Pix copia-e-cola', s.pix.chave ? 'chave configurada' : '<em>PIX_CHAVE ausente</em>']
-      ]);
+      ]) + (rec ? cartao('05', 'Reconhecimento pela câmera', rec.suficiente ? 'verde' : 'amarela', [
+        ['lançamentos confirmados pela câmera', String(rec.confirmadas)],
+        ['acerto da geometria', taxa(rec.geometria)],
+        ['acerto do modelo de visão', taxa(rec.modeloVisao)],
+        ['decididos na mão (empate)', String(rec.decididasNaMao)],
+        ['lançados pela câmera e estornados', String(rec.estornadasDepois)],
+        ...rec.confusoes.slice(0, 3).map(c => ['confundiu', `${esc(c.par)} (${c.n}×)`]),
+        ['limiares em uso', `${rec.limiares.LIM_OK} / ${rec.limiares.LIM_REJ} / ${rec.limiares.SEP_MIN}`],
+        ...(rec.suficiente ? [] : [['atenção', '<em>menos de 30 confirmações — a taxa ainda não diz muito</em>']])
+      ]) : '');
 
     $$('#sistema [data-testar]').forEach(b => b.onclick = async () => {
       const qual = b.dataset.testar, alvo = $(`#res-${qual}`);
@@ -91,6 +100,12 @@
       } catch (e) { alvo.className = 'resultado ruim'; alvo.textContent = e.message; }
       b.disabled = false;
     });
+  }
+
+  /* taxa com o tamanho da amostra junto: 100% de 3 não é 100% de 300 */
+  function taxa(c) {
+    if (!c || !c.n) return 'sem dados ainda';
+    return `${(c.taxa * 100).toFixed(1)}% (${c.acertos} de ${c.n})`;
   }
 
   carregar();

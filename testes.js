@@ -115,8 +115,10 @@ const perfil = (b, ruido, semente) => {
   const o = {}; for (const k of af.CHAVES) o[k] = Math.max(0, Math.min(1, b[k] + r()));
   return o;
 };
-const PICANHA = { ocupacao: .62, centragem: .08, dispersao: .55, elementos: .38, borda: .12, luminancia: .41, cromaA: .63, cromaB: .58 };
-const RISOTO = { ocupacao: .48, centragem: .05, dispersao: .44, elementos: .13, borda: .04, luminancia: .72, cromaA: .49, cromaB: .61 };
+const PICANHA = { ocupacao: .62, centragem: .08, dispersao: .55, elementos: .38, borda: .12, luminancia: .41,
+  cromaA: .63, cromaB: .58, textura: .42, contraste: .38, matiz: .71 };
+const RISOTO = { ocupacao: .48, centragem: .05, dispersao: .44, elementos: .13, borda: .04, luminancia: .72,
+  cromaA: .49, cromaB: .61, textura: .15, contraste: .12, matiz: .93 };
 
 const amPic = Array.from({ length: 8 }, (_, i) => perfil(PICANHA, .02, 7 + i));
 const amRis = Array.from({ length: 8 }, (_, i) => perfil(RISOTO, .02, 99 + i));
@@ -144,6 +146,34 @@ t('prato que não existe no cardápio é recusado, não encaixado à força', ()
   const estranho = {}; for (const k of af.CHAVES) estranho[k] = 0.95;
   const r = af.identificar(estranho, padroes);
   assert.strictEqual(r.camada, 3, r.veredito);
+});
+t('com peso, a foto mal enquadrada é julgada pela cor e pela textura', () => {
+  const padrao = af.envelope(amPic);
+  /* medição com as posições deslocadas, como num prato cortado pelo quadro */
+  const torta = { ...PICANHA, centragem: PICANHA.centragem + .18, dispersao: PICANHA.dispersao - .12,
+    elementos: PICANHA.elementos - .25 };
+  const semPeso = af.afastamento(torta, padrao).dm;
+  const pesos = { ocupacao: .2, centragem: .02, dispersao: .02, elementos: .02, borda: .02,
+    luminancia: 1, cromaA: 1, cromaB: 1, matiz: .9, textura: 1, contraste: 1 };
+  const comPeso = af.afastamento(torta, padrao, { pesos }).dm;
+  assert.ok(comPeso < semPeso / 3, `sem peso ${semPeso.toFixed(2)}, com peso ${comPeso.toFixed(2)}`);
+  /* mas peso nenhum salva uma foto de outro prato: a cor não bate */
+  const outro = { ...RISOTO };
+  assert.ok(af.afastamento(outro, padrao, { pesos }).dm > 3, 'peso não pode aceitar o prato errado');
+});
+t('folga extra nas medidas de posição aproxima a medição do padrão, sem mexer na cor', () => {
+  const sonda = { ...PICANHA, centragem: PICANHA.centragem + 0.05 };
+  const sem = af.identificar(sonda, padroes).dm, com = af.identificar(sonda, padroes, { inflar: 2 }).dm;
+  assert.ok(com < sem, `${com} não é menor que ${sem}`);
+  const corDiferente = { ...PICANHA, cromaA: PICANHA.cromaA + 0.05 };
+  const a1 = af.afastamento(corDiferente, padroes[0], 1).z.cromaA, a2 = af.afastamento(corDiferente, padroes[0], 3).z.cromaA;
+  assert.strictEqual(a1, a2, 'a folga mexeu numa grandeza de cor');
+});
+t('padrão de uma versão do núcleo não se compara com medição de outra', () => {
+  const r = af.identificar(PICANHA, padroes, { versao: 2 });
+  assert.strictEqual(r.camada, -1);
+  assert.match(r.veredito, /regrave/);
+  assert.strictEqual(af.identificar(PICANHA, padroes.map(p => ({ ...p, versao: 2 })), { versao: 2 }).item_id, 1);
 });
 t('vetor incompleto não vira palpite', () => {
   const r = af.identificar({ ocupacao: .5 }, padroes);
@@ -297,6 +327,23 @@ t('as respostas da Focus viram status do sistema', () => {
   assert.ok(ok.danfe.endsWith('/notas_fiscais_consumidor/NFe123.html') && /^http/.test(ok.danfe));
 });
 
+/* ───────── 4d. fuso: a noite é em Brasília, o servidor pode estar em qualquer lugar ───────── */
+console.log('\nFuso');
+const { inicioDaNoite, horaLocal } = require('./server');
+t('às 10h de Brasília a noite ainda é a de ontem, que começou às 12h', () => {
+  assert.strictEqual(inicioDaNoite(Date.parse('2026-09-22T13:00:00Z'), 12).toISOString(), '2026-09-21T15:00:00.000Z');
+});
+t('às 13h de Brasília a noite de hoje já começou', () => {
+  assert.strictEqual(inicioDaNoite(Date.parse('2026-09-22T16:00:00Z'), 12).toISOString(), '2026-09-22T15:00:00.000Z');
+});
+t('23h30 de Brasília (já é outro dia em UTC) ainda é a mesma noite', () => {
+  assert.strictEqual(inicioDaNoite(Date.parse('2026-09-23T02:30:00Z'), 12).toISOString(), '2026-09-22T15:00:00.000Z');
+});
+t('o gráfico da noite mostra a hora de Brasília, não a do servidor', () => {
+  assert.strictEqual(horaLocal('2026-09-23T02:30:00Z'), 23);
+  assert.strictEqual(horaLocal('2026-09-22T15:00:00Z'), 12);
+});
+
 /* ───────── 5. núcleo de visão (canvas) ───────── */
 console.log('\nNúcleo de visão');
 global.window = global;
@@ -304,7 +351,7 @@ require('./nucleo.js');
 
 const L = 320, A = 240;
 function cena({ desvio = 0, raio = 88, nGuarn = 5, vazio = false, cortar = false,
-  quadrado = false, forma = null, tilt = 1 } = {}) {
+  quadrado = false, forma = null, tilt = 1, granulado = false } = {}) {
   if (quadrado) forma = 'quadrado';
   const d = new Uint8ClampedArray(L * A * 4);
   const cx = cortar ? 40 : L / 2, cy = A / 2;
@@ -325,7 +372,15 @@ function cena({ desvio = 0, raio = 88, nGuarn = 5, vazio = false, cortar = false
   }
   if (!vazio) {
     for (let y = 0; y < A; y++) for (let x = 0; x < L; x++) {
-      if (Math.hypot(x - cx - desvio, (y - cy) / tilt) < raio * 0.42) põe(x, y, 150, 82, 46); // carne
+      if (Math.hypot(x - cx - desvio, (y - cy) / tilt) < raio * 0.42) {
+        /* granulado: mesma cor MÉDIA da carne, em grão fino — é o que separa
+           fritas de purê, e o que as 8 grandezas da v2 não viam */
+        if (granulado) {
+          const h = Math.sin((x * 12.9898 + y * 78.233) * 43758.5453) * 43758.5453;
+          const claro = (h - Math.floor(h)) > .5;
+          põe(x, y, claro ? 186 : 114, claro ? 104 : 60, claro ? 58 : 34);
+        } else põe(x, y, 150, 82, 46);                  // carne
+      }
     }
     for (let k = 0; k < nGuarn; k++) {
       const a = k * 2.4, gx = cx + Math.cos(a) * raio * .62, gy = cy + Math.sin(a) * raio * .62 * tilt;
@@ -357,30 +412,182 @@ t('tirar guarnição derruba a contagem de elementos', () => {
   const a = Nucleo.medir(cena({ nGuarn: 5 })), b = Nucleo.medir(cena({ nGuarn: 2 }));
   assert.ok(b.m.elementos < a.m.elementos, `${a.m.elementos} → ${b.m.elementos}`);
 });
-t('prato cortado pela moldura é recusado com número', () => {
-  const r = Nucleo.medir(cena({ cortar: true }));
-  assert.ok(r.falha, 'devia recusar');
-  assert.match(r.falha, /cortado pela borda/);
-});
 t('prato vazio é recusado em vez de medir ruído', () => {
   const r = Nucleo.medir(cena({ vazio: true }));
   assert.ok(r.falha && /vazio|contraste|separar/.test(r.falha), r.falha || 'não recusou');
 });
-t('forma quadrada não passa por prato', () => {
-  const r = Nucleo.medir(cena({ quadrado: true }));
-  assert.ok(r.falha, 'devia recusar');
-  assert.match(r.falha, /elipse ajustada/);
+t('a medição diz onde está o prato, em fração do quadro', () => {
+  const r = Nucleo.medir(cena());
+  assert.ok(Math.abs(r.centro.x - 0.5) < 0.02 && Math.abs(r.centro.y - 0.5) < 0.02, JSON.stringify(r.centro));
+  assert.ok(Math.abs(r.raioRel - 88 / 320) < 0.02, `raio relativo ${r.raioRel}`);
 });
-t('prato inclinado ainda é prato (30, 45 e 60 graus)', () => {
-  for (const tilt of [0.87, 0.707, 0.5]) {
-    const r = Nucleo.medir(cena({ tilt }));
-    assert.ok(!r.falha, `tilt ${tilt}: ${r.falha}`);
-    assert.ok(r.desencaixe <= Nucleo.LIMIARES.desencaixe, `tilt ${tilt} desencaixe ${r.desencaixe}`);
+t('a média de três quadros iguais é a medição de um, sem oscilação', () => {
+  const um = Nucleo.medir(cena());
+  const m = Nucleo.media([um, Nucleo.medir(cena()), Nucleo.medir(cena())]);
+  assert.strictEqual(m.quadros, 3);
+  assert.strictEqual(m.oscilacao, 0);
+  assert.deepStrictEqual(m.m, um.m);
+});
+t('a média ignora o quadro que falhou e mede com os outros', () => {
+  const m = Nucleo.media([Nucleo.medir(cena({ vazio: true })), Nucleo.medir(cena()), Nucleo.medir(cena({ desvio: 6 }))]);
+  assert.strictEqual(m.quadros, 2);
+  const a = Nucleo.medir(cena()).m.centragem, b = Nucleo.medir(cena({ desvio: 6 })).m.centragem;
+  assert.ok(Math.abs(m.m.centragem - (a + b) / 2) < 1e-6, 'não é a média dos dois quadros bons');
+});
+/* ── núcleo v2: enquadramento, resolução, ângulo, luz e objeto certo ──
+   Cenas com supersample 2×2, tudo em fração do quadro. Cada teste compara a
+   medição difícil com a mesma cena bem enquadrada: o que se exige não é
+   "mediu", é "mediu o mesmo". */
+/* gerador de cenas para medir o núcleo: tudo em fração do quadro, supersample 2×2 */
+function cena2({ L = 480, A = 360, cx = .5, cy = .5, R = .36, tilt = 1, rot = 0, fundo = [26, 24, 22],
+  prato = [238, 236, 231], forma = 'circulo', cast = [1, 1, 1], comida = true, desvioComida = 0,
+  guarn = 5, extras = [] } = {}) {
+  const d = new Uint8ClampedArray(L * A * 4);
+  const m = Math.min(L, A), X = cx * L, Y = cy * A, r = R * m;
+  const co = Math.cos(rot), si = Math.sin(rot);
+  const loc = (x, y) => { const dx = x - X, dy = y - Y; return [(dx * co + dy * si), (-dx * si + dy * co) / tilt]; };
+  const dentroPrato = (x, y) => { const [u, v] = loc(x, y);
+    return forma === 'quadrado' ? Math.max(Math.abs(u), Math.abs(v)) <= r : Math.hypot(u, v) <= r; };
+  const cor = (x, y) => {
+    for (const e of extras) { const c = e(x, y, L, A); if (c) return c; }
+    if (!dentroPrato(x, y)) return fundo;
+    if (comida) {
+      const [u, v] = loc(x, y);
+      if (Math.hypot(u - desvioComida * r, v) < r * 0.42) return [150, 82, 46];
+      for (let k = 0; k < guarn; k++) {
+        const a = k * 2.4, gx = Math.cos(a) * r * .62, gy = Math.sin(a) * r * .62;
+        if (Math.hypot(u - gx, v - gy) < r * 0.09) return [60, 120, 52];
+      }
+    }
+    return prato;
+  };
+  for (let y = 0; y < A; y++) for (let x = 0; x < L; x++) {
+    let R0 = 0, G0 = 0, B0 = 0;
+    for (const [ox, oy] of [[.25, .25], [.75, .25], [.25, .75], [.75, .75]]) {
+      const c = cor(x + ox, y + oy); R0 += c[0]; G0 += c[1]; B0 += c[2];
+    }
+    const i = (y * L + x) * 4;
+    d[i] = R0 / 4 * cast[0]; d[i + 1] = G0 / 4 * cast[1]; d[i + 2] = B0 / 4 * cast[2]; d[i + 3] = 255;
+  }
+  return { width: L, height: A, data: d };
+}
+
+
+const maiorDesvio = (a, b, chaves = Nucleo.CHAVES) => Math.max(...chaves.map(k => Math.abs(a.m[k] - b.m[k])));
+const REF = Nucleo.medir(cena2({}));
+t('a medição sai marcada como versão 3 do núcleo', () => {
+  assert.strictEqual(REF.versao, 3);
+  assert.strictEqual(REF.forma, 'elipse');
+});
+t('o ajuste de elipse acha o prato com só 150° do contorno à vista', () => {
+  const xs = [], ys = [];
+  for (let k = 0; k < 300; k++) { const t0 = k / 300 * 150 * Math.PI / 180;
+    const u = 120 * Math.cos(t0), v = 80 * Math.sin(t0);
+    xs.push(200 + u * Math.cos(.5) - v * Math.sin(.5)); ys.push(150 + u * Math.sin(.5) + v * Math.cos(.5)); }
+  const e = Nucleo.ajustarElipse(xs, ys);
+  assert.ok(Math.hypot(e.cx - 200, e.cy - 150) < 0.5 && Math.abs(e.ea - 120) < 0.5 && Math.abs(e.eb - 80) < 0.5,
+    JSON.stringify(e));
+});
+t('qualquer resolução: 320×240, 1280×960 e retrato 360×640 medem o mesmo', () => {
+  for (const op of [{ L: 320, A: 240 }, { L: 1280, A: 960 }, { L: 360, A: 640 }]) {
+    const r = Nucleo.medir(cena2(op));
+    assert.ok(!r.falha, `${op.L}×${op.A}: ${r.falha}`);
+    assert.ok(maiorDesvio(r, REF) < 0.01, `${op.L}×${op.A}: desvio ${maiorDesvio(r, REF)}`);
   }
 });
-t('tábua hexagonal também é recusada', () => {
-  const r = Nucleo.medir(cena({ forma: 'hexagono' }));
-  assert.ok(r.falha, 'devia recusar');
+t('prato 25% fora do quadro é lido, e as grandezas de cor e textura não se mexem', () => {
+  const ref = Nucleo.medir(cena2({ guarn: 0 })), r = Nucleo.medir(cena2({ guarn: 0, cx: .16 }));
+  assert.ok(!r.falha, r.falha);
+  assert.ok(r.visivel > .8 && r.visivel < .9, `visível ${r.visivel}`);
+  /* o que não pode se mexer é o que decide num prato cortado */
+  for (const k of ['luminancia', 'cromaA', 'cromaB', 'textura', 'contraste'])
+    assert.ok(Math.abs(r.m[k] - ref.m[k]) < 0.01, `${k} mudou ${(r.m[k] - ref.m[k]).toFixed(4)}`);
+  assert.ok(r.pesos.centragem < ref.pesos.centragem, 'as medidas de posição deviam pesar menos');
+  assert.ok(r.ressalvas.some(x => /fora do quadro/.test(x)));
+});
+t('metade do prato fora do quadro ainda é lido; abaixo de ~35% visível, recusa', () => {
+  /* v3: o limite caiu de 55% para 35% de prato visível. O que sustenta isso
+     são os pesos — num prato cortado, cor e textura decidem e as medidas de
+     posição quase não contam. */
+  const metade = Nucleo.medir(cena2({ guarn: 0, cx: -.01 }));
+  assert.ok(!metade.falha, metade.falha);
+  assert.ok(metade.visivel > .45 && metade.visivel < .55, `visível ${metade.visivel}`);
+  assert.ok(metade.pesos.centragem < 0.1 && metade.pesos.textura > 0.8,
+    `pesos: ${JSON.stringify(metade.pesos)}`);
+  const quase = Nucleo.medir(cena2({ guarn: 0, cx: -.12 }));
+  assert.ok(quase.falha && /afaste ou centralize/.test(quase.falha), JSON.stringify(quase.falha || quase.visivel));
+});
+t('comida cortada pelo quadro é detectada e pede folga nas medidas de posição', () => {
+  const r = Nucleo.medir(cena2({ cx: .06 }));
+  assert.ok(r.comidaCortada > 0.1 && r.inflar > 1.3, `cortada ${r.comidaCortada}, folga ${r.inflar}`);
+  assert.strictEqual(Nucleo.medir(cena2({})).inflar, 1);
+});
+t('prato inclinado a ~53°: medido pela elipse, bate com o de cima', () => {
+  const r = Nucleo.medir(cena2({ tilt: .6 }));
+  assert.ok(!r.falha, r.falha);
+  assert.ok(maiorDesvio(r, REF) < 0.01, `desvio ${maiorDesvio(r, REF)}`);
+  assert.ok(Math.abs(r.razaoElipse - .6) < .03, `razão ${r.razaoElipse}`);
+});
+t('luz fria, quente e verde: a louça corrige a cor', () => {
+  for (const cast of [[.86, .97, 1.05], [1.06, 1, .84], [.92, 1.04, .9]]) {
+    const r = Nucleo.medir(cena2({ cast }));
+    assert.ok(r.correcaoDeLuz, `sem correção em ${cast}`);
+    const d = maiorDesvio(r, REF, ['luminancia', 'cromaA', 'cromaB']);
+    assert.ok(d < 0.015, `luz ${cast}: desvio de cor ${d}`);
+  }
+});
+t('mesa clara e prato escuro em mesa clara: o fundo vem da moldura da foto', () => {
+  for (const op of [{ fundo: [205, 188, 160] }, { prato: [48, 50, 54], fundo: [210, 200, 185] }]) {
+    const r = Nucleo.medir(cena2(op));
+    assert.ok(!r.falha && r.forma === 'elipse' && Math.abs(r.contorno.cx - .5) < .02, JSON.stringify(r.falha || r.contorno));
+  }
+});
+t('tábua girada é lida como tábua, não recusada', () => {
+  const r = Nucleo.medir(cena2({ forma: 'quadrado', prato: [205, 170, 120], rot: .3, R: .3 }));
+  assert.ok(!r.falha, r.falha);
+  assert.strictEqual(r.forma, 'retangulo');
+});
+t('dois pratos encostados: lê um deles, não a união', () => {
+  const outro = (x, y, L, A) => Math.hypot(x - .74 * L, y - .5 * A) < .26 * Math.min(L, A) ? [236, 234, 229] : null;
+  const r = Nucleo.medir(cena2({ cx: .34, R: .26, extras: [outro] }));
+  assert.ok(!r.falha, r.falha);
+  assert.ok(Math.abs(r.contorno.cx - .34) < .03 && Math.abs(r.contorno.ea - .26 * 360 / 480) < .02, JSON.stringify(r.contorno));
+});
+t('copo ao lado e toalha xadrez não roubam o foco', () => {
+  const copo = (x, y, L, A) => Math.hypot(x - .86 * L, y - .3 * A) < .1 * Math.min(L, A) ? [230, 180, 60] : null;
+  const xadrez = (x, y) => ((Math.floor(x / 24) + Math.floor(y / 24)) % 2 && Math.hypot(x - 240, y - 180) > .2 * 360 + 3) ? [180, 40, 40] : null;
+  for (const op of [{ cx: .42, R: .3, extras: [copo] }, { cx: .5, R: .2, extras: [xadrez] }]) {
+    const r = Nucleo.medir(cena2(op));
+    assert.ok(!r.falha, r.falha);
+    assert.ok(Math.abs(r.contorno.cx - op.cx) < .03, `achou o centro em ${r.contorno.cx}, o prato está em ${op.cx}`);
+    assert.strictEqual(r.forma, 'elipse');
+  }
+});
+t('a v3 mede textura, contraste e matiz, e eles separam o que a cor não separa', () => {
+  const liso = Nucleo.medir(cena({ nGuarn: 0 }));
+  assert.ok(Nucleo.CHAVES.includes('textura') && Nucleo.CHAVES.includes('matiz'));
+  for (const k of ['textura', 'contraste', 'matiz'])
+    assert.ok(liso.m[k] >= 0 && liso.m[k] <= 1, `${k} fora de [0,1]: ${liso.m[k]}`);
+  /* mesma cor, mesmo tamanho, texturas diferentes: as 3 novas precisam ver
+     diferença onde as 8 antigas veem quase nada */
+  const granulado = Nucleo.medir(cena({ nGuarn: 0, granulado: true }));
+  const antigas = ['ocupacao', 'centragem', 'dispersao', 'elementos', 'borda', 'luminancia', 'cromaA', 'cromaB'];
+  const dAnt = Math.max(...antigas.map(k => Math.abs(granulado.m[k] - liso.m[k])));
+  const dNovas = Math.max(...['textura', 'contraste'].map(k => Math.abs(granulado.m[k] - liso.m[k])));
+  assert.ok(dNovas > 3 * dAnt, `novas ${dNovas.toFixed(3)} × antigas ${dAnt.toFixed(3)}`);
+});
+t('a textura é medida em escala do prato: a mesma comida de perto e de longe', () => {
+  const perto = Nucleo.medir(cena2({ R: .42 })), longe = Nucleo.medir(cena2({ R: .22 }));
+  assert.ok(Math.abs(perto.m.textura - longe.m.textura) < 0.02,
+    `textura ${perto.m.textura} × ${longe.m.textura}`);
+});
+t('cada medição diz o peso de cada grandeza, e o corte derruba só as de posição', () => {
+  const inteiro = Nucleo.medir(cena2({}));
+  assert.ok(Object.keys(inteiro.pesos).length === Nucleo.CHAVES.length);
+  for (const k of Nucleo.CHAVES) assert.ok(inteiro.pesos[k] > 0.7, `${k} pesa ${inteiro.pesos[k]} num prato inteiro`);
+  const cortado = Nucleo.medir(cena2({ guarn: 0, cx: .05 }));
+  assert.ok(cortado.pesos.centragem < 0.2 && cortado.pesos.elementos < 0.2, JSON.stringify(cortado.pesos));
+  assert.ok(cortado.pesos.textura > 0.8 && cortado.pesos.luminancia > 0.5, JSON.stringify(cortado.pesos));
 });
 t('o filtro de caixa é o mesmo em qualquer aparelho (sem reescalonador do canvas)', () => {
   const grande = { width: 640, height: 480, data: new Uint8ClampedArray(640 * 480 * 4) };
@@ -397,6 +604,70 @@ t('padrão aprendido de cenas sintéticas reconhece a mesma cena', () => {
   const r = af.identificar(Nucleo.medir(cena({ desvio: 2 })).m,
     [{ item_id: 9, nome: 'Cena de teste', preco_cent: 100, ...env, n: amostras.length }]);
   assert.strictEqual(r.camada, 0, r.veredito);
+});
+
+
+/* ───────── 5b. captura automática ───────── */
+console.log('\nCaptura automática');
+require('./captura.js');
+const leitura = (cx = .5, cy = .5, ea = .3, extra = {}) => ({ contorno: { cx, cy, ea, eb: ea, th: 0 }, forma: 'elipse', qualidade: .9, ...extra });
+const semPrato = { falha: 'não achei a borda' };
+const roda = (cap, seq, t0 = 0, passo = 250) => seq.map((r, k) => cap.observar(r, t0 + k * passo).acao);
+t('fotografa sozinho quando o prato fica parado por quatro leituras', () => {
+  const cap = Captura.nova();
+  assert.deepStrictEqual(roda(cap, [leitura(), leitura(), leitura(), leitura()]), ['nada', 'nada', 'nada', 'capturar']);
+});
+t('prato mexendo não é fotografado', () => {
+  const cap = Captura.nova();
+  const acoes = roda(cap, [leitura(.40), leitura(.46), leitura(.52), leitura(.58), leitura(.64)]);
+  assert.ok(!acoes.includes('capturar'), acoes.join(','));
+});
+t('leitura ruim no meio zera a contagem', () => {
+  const cap = Captura.nova();
+  const acoes = roda(cap, [leitura(), leitura(), semPrato, leitura(), leitura(), leitura()]);
+  assert.ok(!acoes.includes('capturar'), 'fotografou sem quatro leituras boas seguidas');
+});
+t('o MESMO prato parado não é fotografado duas vezes', () => {
+  const cap = Captura.nova();
+  roda(cap, [leitura(), leitura(), leitura(), leitura()]);
+  cap.capturou(leitura().contorno, 1000);
+  const depois = roda(cap, Array(20).fill(leitura()), 1250);
+  assert.ok(!depois.includes('capturar'), 'lançaria o mesmo prato de novo');
+});
+t('prato sai do quadro e outro entra: volta a fotografar', () => {
+  const cap = Captura.nova();
+  roda(cap, [leitura(), leitura(), leitura(), leitura()]);
+  cap.capturou(leitura().contorno, 1000);
+  const depois = roda(cap, [...Array(6).fill(semPrato), ...Array(4).fill(leitura())], 1250);
+  assert.strictEqual(depois.at(-1), 'capturar');
+});
+t('sumiço rápido (mão passando na frente) não destrava', () => {
+  const cap = Captura.nova();
+  roda(cap, [leitura(), leitura(), leitura(), leitura()]);
+  cap.capturou(leitura().contorno, 1000);
+  const depois = roda(cap, [semPrato, semPrato, ...Array(8).fill(leitura())], 1250);
+  assert.ok(!depois.includes('capturar'), 'uma mão passando fez fotografar o mesmo prato de novo');
+});
+t('outro prato no lugar (tamanho bem diferente) é fotografado sem precisar sair', () => {
+  const cap = Captura.nova();
+  roda(cap, [leitura(), leitura(), leitura(), leitura()]);
+  cap.capturou(leitura().contorno, 1000);
+  const depois = roda(cap, Array(5).fill(leitura(.5, .5, .18)), 1250);
+  assert.strictEqual(depois.at(-1), 'capturar');
+});
+t('modo ensinar: nova foto depois de mexer um pouco o prato e esperar', () => {
+  const cap = Captura.nova();
+  cap.modoEnsinar(true);
+  roda(cap, [leitura(), leitura(), leitura(), leitura()]);
+  cap.capturou(leitura().contorno, 1000);
+  assert.ok(!roda(cap, Array(8).fill(leitura()), 1250).includes('capturar'), 'fotografou sem o prato mexer');
+  const mexido = roda(cap, Array(5).fill(leitura(.54)), 3500);
+  assert.strictEqual(mexido.at(-1), 'capturar');
+});
+t('qualidade baixa não conta como leitura boa', () => {
+  const cap = Captura.nova();
+  const acoes = roda(cap, Array(6).fill(leitura(.5, .5, .3, { qualidade: .3 })));
+  assert.ok(!acoes.includes('capturar'));
 });
 
 /* ───────── 6. fluxo HTTP ponta a ponta ───────── */
@@ -436,7 +707,7 @@ t('padrão aprendido de cenas sintéticas reconhece a mesma cena', () => {
     const r = await chama('/api/mesas/7/abrir', { method: 'POST', corpo: { pessoas: 4 } });
     assert.strictEqual(r.status, 201);
     comanda = r.corpo.comanda_id; codigo = r.corpo.codigo;
-    assert.match(codigo, /^[0-9A-F]{8}$/);
+    assert.match(codigo, /^[0-9A-F]{12}$/, 'código da conta precisa de 48 bits (12 hex)');
   });
   await ta('abrir a mesma mesa de novo é bloqueado', async () => {
     assert.strictEqual((await chama('/api/mesas/7/abrir', { method: 'POST', corpo: { pessoas: 2 } })).status, 409);
@@ -1273,6 +1544,64 @@ t('padrão aprendido de cenas sintéticas reconhece a mesma cena', () => {
     assert.strictEqual(r.corpo.ia.ligada, true);
   });
 
+  /* ---------- o caminho até a tela: eventos, cliente, avisos ---------- */
+  console.log('\nTempo real e cliente');
+  const espera = ms => new Promise(r => setTimeout(r, ms));
+  await ta('o salão recebe pelo canal de eventos o pedido do celular e o item pronto', async () => {
+    const a = await chama('/api/mesas/13/abrir', { method: 'POST', corpo: { pessoas: 2 } });
+    const l = await chama(`/api/comandas/${a.corpo.comanda_id}/itens`, { method: 'POST', corpo: { item_id: 1, qtd: 1 } });
+    const ctl = new AbortController();
+    const r = await fetch(`${base}/api/eventos`, { headers: { authorization: `Bearer ${token}` }, signal: ctl.signal });
+    const leitor = r.body.getReader();
+    let texto = '';
+    const lendo = (async () => { try { for (;;) { const { value, done } = await leitor.read(); if (done) break;
+      texto += Buffer.from(value).toString(); } } catch {} })();
+    await espera(150);
+    await fetch(`${base}/api/conta/${a.corpo.codigo}/pedido`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ itens: [{ item_id: 2, qtd: 1 }] }) });
+    await chama(`/api/lancamentos/${l.corpo.lancamento_id}/estado`, { method: 'POST', corpo: { estado: 'pronto' } });
+    await espera(300);
+    ctl.abort(); await lendo;
+    assert.ok(texto.includes('"tipo":"pedido-cliente"'), 'o pedido do celular não chegou à tela');
+    assert.ok(texto.includes('"tipo":"item-pronto"'), 'o item pronto não chegou à tela');
+    assert.ok(!/event: (pedido-cliente|item-pronto)/.test(texto),
+      'evento com nome: o navegador só entrega a quem escuta aquele nome exato');
+  });
+  let contaCli;
+  await ta('o cliente divide pela tela dele, sem login', async () => {
+    const a = await chama('/api/mesas/14/abrir', { method: 'POST', corpo: { pessoas: 2 } });
+    contaCli = a.corpo;
+    const l = await chama(`/api/comandas/${a.corpo.comanda_id}/itens`, { method: 'POST', corpo: { item_id: 1, qtd: 2 } });
+    const r = await fetch(`${base}/api/conta/${a.corpo.codigo}/divisao/${l.corpo.lancamento_id}`, { method: 'PUT',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pessoas: [2] }) });
+    assert.strictEqual(r.status, 200, 'o cliente levou 401 — e o 401 o mandava para o PIN da equipe');
+    const c = await (await fetch(`${base}/api/conta/${a.corpo.codigo}`)).json();
+    assert.deepStrictEqual(c.itens.find(i => i.id === l.corpo.lancamento_id).divisao, [2]);
+  });
+  await ta('o código de uma conta não mexe em item de outra', async () => {
+    const outra = await chama('/api/mesas/15/abrir', { method: 'POST', corpo: { pessoas: 2 } });
+    const l = await chama(`/api/comandas/${outra.corpo.comanda_id}/itens`, { method: 'POST', corpo: { item_id: 1, qtd: 1 } });
+    const r = await fetch(`${base}/api/conta/${contaCli.codigo}/divisao/${l.corpo.lancamento_id}`, { method: 'PUT',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pessoas: [1] }) });
+    assert.strictEqual(r.status, 404);
+  });
+  await ta('pedir a conta duas vezes seguidas: o segundo aviso é segurado', async () => {
+    const chamar = () => fetch(`${base}/api/conta/${contaCli.codigo}/chamar`, { method: 'POST',
+      headers: { 'content-type': 'application/json' }, body: JSON.stringify({ tipo: 'conta' }) });
+    assert.strictEqual((await chamar()).status, 200);
+    assert.strictEqual((await chamar()).status, 429, 'o tablet do salão apitaria sem parar');
+  });
+  await ta('"pediu a conta" sai no barramento como CONT, não como chamada de garçom', async () => {
+    const ev = require('./server').banco().prepare(
+      `SELECT urb1 FROM eventos WHERE mesa=14 AND tipo='pediu-conta' ORDER BY id DESC LIMIT 1`).get();
+    assert.match(ev.urb1, /^URB1 CLI CONT /, ev.urb1);
+  });
+  await ta('o ticket médio é o que entrou dividido pelas comandas que fecharam', async () => {
+    const n = (await chama('/api/noite')).corpo;
+    assert.ok(n.comandas > 0);
+    assert.strictEqual(n.ticket_cent, Math.round(n.caixa.recebido_cent / n.comandas));
+  });
+
   /* ---------- segurança ---------- */
   console.log('\nSegurança');
   const cripto = require('node:crypto');
@@ -1383,6 +1712,69 @@ t('padrão aprendido de cenas sintéticas reconhece a mesma cena', () => {
     assert.match(r.corpo.erro, /prazo/);
   });
 
+  /* ---------- reconhecimento medido no uso ---------- */
+  console.log('\nReconhecimento medido');
+  await ta('o relatório junta a previsão com o que o garçom lançou', async () => {
+    const card = (await chama('/api/cardapio')).corpo.filter(i => i.afericao);
+    const alvo = card[2];
+    await chama('/api/padroes', { method: 'POST', corpo: { item_id: alvo.id, amostras: amRis } });
+    /* 1: a geometria acerta e o garçom lança o que ela disse */
+    const r1 = (await chama('/api/reconhecer', { method: 'POST', corpo: { grandezas: perfil(RISOTO, .01, 777) } })).corpo;
+    assert.strictEqual(r1.camada, 0, r1.veredito);
+    await chama(`/api/comandas/${contaCli.comanda_id}/itens`, { method: 'POST',
+      corpo: { item_id: r1.item_id, qtd: 1, origem: 'camera', medicao_id: r1.medicao_id } });
+    /* 2: a geometria diz um prato e o garçom corrige para outro */
+    const r2 = (await chama('/api/reconhecer', { method: 'POST', corpo: { grandezas: perfil(RISOTO, .01, 778) } })).corpo;
+    await chama(`/api/comandas/${contaCli.comanda_id}/itens`, { method: 'POST',
+      corpo: { item_id: card[0].id, qtd: 1, origem: 'camera', medicao_id: r2.medicao_id } });
+    const rel = (await comoGerente(() => chama('/api/afericao/relatorio'))).corpo;
+    assert.strictEqual(rel.confirmadas, 2);
+    assert.strictEqual(rel.geometria.n, 2);
+    assert.strictEqual(rel.geometria.acertos, 1);
+    assert.strictEqual(rel.geometria.taxa, 0.5);
+    assert.ok(rel.confusoes.some(c => c.par === `${alvo.nome} → ${card[0].nome}` && c.n === 1), JSON.stringify(rel.confusoes));
+    assert.strictEqual(rel.suficiente, false);
+  });
+  await ta('o relatório é só do gerente', async () => {
+    assert.strictEqual((await chama('/api/afericao/relatorio')).status, 403);
+  });
+  await ta('cadastrar um prato gêmeo de outro avisa na hora', async () => {
+    const card = (await chama('/api/cardapio')).corpo.filter(i => i.afericao);
+    const r = await chama('/api/padroes', { method: 'POST', corpo: { item_id: card[3].id, amostras: amRis } });
+    assert.strictEqual(r.status, 200);
+    const g = r.corpo.gemeos.find(x => x.item === card[2].nome);
+    assert.ok(g, 'não avisou do gêmeo: ' + JSON.stringify(r.corpo.gemeos));
+    assert.strictEqual(g.nivel, 'indistinguivel');
+  });
+
+  await ta('padrão gravado com o núcleo novo é marcado e reconhecido pela medição nova', async () => {
+    const card = (await chama('/api/cardapio')).corpo.filter(i => i.afericao);
+    const amostrasV2 = [0, 1, 2, 3].map(k => perfil(RISOTO, .01, 900 + k));
+    const g = await chama('/api/padroes', { method: 'POST', corpo: { item_id: card[4].id, amostras: amostrasV2, versao: 2 } });
+    assert.strictEqual(g.corpo.versao, 2);
+    const r = (await chama('/api/reconhecer', { method: 'POST',
+      corpo: { grandezas: perfil(RISOTO, .01, 950), versao: 2 } })).corpo;
+    assert.strictEqual(r.item_id, card[4].id, r.veredito);
+    const rel = (await comoGerente(() => chama('/api/afericao/relatorio'))).corpo;
+    assert.ok(rel.padroesPorVersao.v2 >= 1 && rel.padroesPorVersao.v1 >= 1, JSON.stringify(rel.padroesPorVersao));
+  });
+
+  await ta('padrão gravado hoje reconhece a foto de hoje: a versão do núcleo atravessa o servidor', async () => {
+    /* Este teste existe porque o servidor tinha a versão do núcleo escrita à
+       mão ("=== 2 ? 2 : 1"): a v3 era gravada como v1 e nenhum prato voltava
+       a ser reconhecido depois de atualizar o núcleo. */
+    const card = (await chama('/api/cardapio')).corpo.filter(i => i.afericao);
+    const alvo = card[4] || card[0];
+    const amostras = [-2, -1, 0, 1, 2].map(k => Nucleo.medir(cena({ desvio: k })).m);
+    const g = await chama('/api/padroes', { method: 'POST',
+      corpo: { item_id: alvo.id, amostras, versao: Nucleo.VERSAO } });
+    assert.strictEqual(g.corpo.versao, Nucleo.VERSAO, 'o servidor não guardou a versão do núcleo');
+    const medida = Nucleo.medir(cena({ desvio: 0.5 }));
+    const r = await chama('/api/reconhecer', { method: 'POST',
+      corpo: { grandezas: medida.m, versao: medida.versao, pesos: medida.pesos } });
+    assert.strictEqual(r.corpo.candidatos[0].item_id, alvo.id, r.corpo.veredito);
+  });
+
   await ta('o sinal de vida responde sem sessão', async () => {
     const r = await fetch(`${base}/api/saude`);
     assert.strictEqual(r.status, 200);
@@ -1400,6 +1792,33 @@ t('padrão aprendido de cenas sintéticas reconhece a mesma cena', () => {
     assert.match(f.headers.get('content-type'), /image\/jpeg/);
     assert.strictEqual((await fetch(`${base}/marca.png`)).status, 404, 'a logo antiga ainda é servida');
   });
+  await ta('tudo que as páginas carregam existe, está na lista branca e é servido', async () => {
+    /* Esta bateria não pegaria um arquivo que some da entrega: captura.js
+       sumiu de uma cópia e a tela da câmera foi ao ar chamando Captura.nova()
+       sem o arquivo. Agora cada página é lida e cada dependência é buscada
+       do servidor de verdade. */
+    const fs = require('node:fs');
+    const paginas = fs.readdirSync('.').filter(f => f.endsWith('.html') && f !== 'casca.html');
+    let conferidos = 0;
+    for (const pagina of paginas) {
+      const html = fs.readFileSync(pagina, 'utf8');
+      const locais = [...html.matchAll(/(?:script src|link[^>]*href)="(\/[^"]+)"/g)].map(m => m[1]);
+      for (const caminho of locais) {
+        assert.ok(fs.existsSync(caminho.slice(1)), `${pagina} carrega ${caminho}, que não existe na pasta`);
+        const r = await fetch(base + caminho);
+        assert.strictEqual(r.status, 200, `${pagina} carrega ${caminho} — o servidor respondeu ${r.status}`);
+        conferidos++;
+      }
+      /* e o que o script da página usa de outro arquivo tem de estar carregado */
+      for (const [global, dono] of [['Captura', 'captura.js'], ['Nucleo', 'nucleo.js'],
+        ['Caixinha', 'caixinha.js'], ['Alerta', 'alerta.js']]) {
+        if (new RegExp(`\\b${global}\\.`).test(html) && !html.includes(`/${dono}`))
+          assert.fail(`${pagina} usa ${global} mas não carrega ${dono}`);
+      }
+    }
+    assert.ok(conferidos >= 20, `só ${conferidos} dependências conferidas`);
+  });
+
   await ta('a lista branca não deixa baixar código nem banco', async () => {
     for (const p of ['/server.js', '/testes.js', '/db.js', '/assistente.js', '/package.json',
       '/dados/salao.db', '/../server.js', '/.node-version']) {

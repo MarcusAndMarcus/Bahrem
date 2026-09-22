@@ -35,6 +35,8 @@
     'mesa-aberta':    () => { tom(523, .22, 'triangle', .18); },
     'mesa-fechada':   () => { tom(392, .18, 'triangle', .18); },
     'padrao-gravado': () => { tom(523, .18); apos(() => tom(784, .3), 220); },
+    'lancamento':     () => { tom(784, .12, 'triangle', .22); },
+    'pedido-aceito':  () => { tom(784, .12, 'triangle', .22); apos(() => tom(988, .16, 'triangle', .22), 150); },
   };
 
   const URGENTES = new Set(['chamou-garcom', 'pediu-conta', 'pedido-cliente']);
@@ -52,6 +54,8 @@
     'padrao-gravado': d => `Padrão de ${d.item || 'prato'} gravado`,
     'reabertura':     d => `Mesa ${d.mesa} reaberta`,
     'estorno':        d => `Estorno na mesa ${d.mesa}`,
+    'lancamento':     d => `Mesa ${d.mesa}: ${d.qtd || 1}× ${d.nome || 'item'}`,
+    'pedido-aceito':  d => `Mesa ${d.mesa}: ${d.nome || 'item'} (pedido do celular)`,
   };
 
   let area = null;
@@ -66,7 +70,10 @@
 
   let ultimoTipo = null, ultimaMsg = null, repetidos = 0;
 
-  function toast(tipo, dado = {}) {
+  /* cada tela diz o que quer ouvir: o salão não precisa apitar a cada item
+     que ele mesmo lança, e a cozinha não precisa saber de conta pedida */
+  function toast(tipo, dado = {}, permitidos = null) {
+    if (permitidos && !permitidos.includes(tipo)) return;
     const msg = MSG[tipo] ? MSG[tipo](dado) : null;
     if (!msg) return;
 

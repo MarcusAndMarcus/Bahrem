@@ -719,13 +719,16 @@
   };
 
   /* ---------- tempo real ---------- */
+  const AVISOS_SALAO = ['chamou-garcom', 'pediu-conta', 'pedido-cliente', 'item-pronto', 'transferencia',
+    'desconto', 'estorno', 'mesa-aberta', 'mesa-fechada', 'reabertura', 'padrao-gravado'];
+  const recarregar = B.adiar(() => carregar().catch(() => {}));
   escutar((tipo, dado) => {
     if (dado.urb1) {
       telegramas = [dado.urb1, ...telegramas].slice(0, 3);
       $('#urb1').textContent = telegramas.join('   ·   ');
     }
-    if (window.Alerta) Alerta.toast(tipo, dado);
-    carregar();
+    if (window.Alerta) Alerta.toast(tipo, dado, AVISOS_SALAO);
+    recarregar();
   }, ligado => {
     if (!ligado) $('#urb1').textContent = 'URB1 — sem ligação com o servidor, tentando de novo…';
   });
@@ -733,6 +736,9 @@
   verDados();
   setInterval(verDados, 60000);
   setInterval(() => { if (estado) desenhar(); }, 30000);
+  /* rede de segurança: se o canal de eventos cair calado (proxy que fecha
+     conexão ociosa), a tela não fica parada no passado */
+  setInterval(() => { if (!document.hidden) recarregar(); }, 45000);
   carregar().catch(e => { $('#salao').innerHTML = `<p class="vazio" style="padding:24px">${esc(e.message)}</p>`; });
 })();
 </script>

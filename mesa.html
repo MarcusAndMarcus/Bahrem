@@ -79,7 +79,11 @@
       try {
         await api(`/api/conta/${encodeURIComponent(codigo)}/chamar`, { method: 'POST', corpo: { tipo: b.dataset.chamar } });
         b.textContent = b.dataset.chamar === 'conta' ? 'conta pedida' : 'garçom avisado';
-      } catch { b.textContent = antes; b.disabled = false; }
+      } catch (e) {
+        /* 429: já avisado há menos de 30 s — diz isso em vez de fingir que falhou */
+        if (e.status === 429) { b.textContent = 'já avisado — um instante'; setTimeout(() => { b.textContent = antes; b.disabled = false; }, 8000); }
+        else { b.textContent = antes; b.disabled = false; }
+      }
     });
   }
 
@@ -214,7 +218,8 @@
       marcados.has(p) ? marcados.delete(p) : marcados.add(p);
       b.classList.toggle('marcado');
       try {
-        await api(`/api/lancamentos/${id}/divisao`, { method: 'PUT', corpo: { pessoas: [...marcados] } });
+        await api(`/api/conta/${encodeURIComponent(codigo)}/divisao/${id}`, { method: 'PUT',
+          corpo: { pessoas: [...marcados] } });
         await carregar(true);
       } catch { b.classList.toggle('marcado'); }
     });

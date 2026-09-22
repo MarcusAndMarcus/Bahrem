@@ -51,6 +51,7 @@ function esquema(db) {
   CREATE TABLE IF NOT EXISTS padroes (
     id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL REFERENCES cardapio(id) ON DELETE CASCADE,
     n INTEGER NOT NULL, mu TEXT NOT NULL, sigma TEXT NOT NULL, atualizado_em TEXT NOT NULL,
+    versao INTEGER NOT NULL DEFAULT 1,
     UNIQUE(item_id));
 
   CREATE TABLE IF NOT EXISTS comandas (
@@ -99,6 +100,7 @@ function esquema(db) {
   CREATE INDEX IF NOT EXISTS ix_lanc_estado ON lancamentos(estado);
   CREATE INDEX IF NOT EXISTS ix_pag_comanda ON pagamentos(comanda_id);
   CREATE INDEX IF NOT EXISTS ix_notas_comanda ON notas(comanda_id);
+  CREATE INDEX IF NOT EXISTS ix_eventos_mesa ON eventos(mesa, tipo, criado_em);
   CREATE INDEX IF NOT EXISTS ix_comanda_mesa ON comandas(mesa_id, status);
   `);
 }
@@ -118,6 +120,7 @@ function migrar(db) {
     ['lancamentos', 'estornado_em', 'TEXT'],
     ['lancamentos', 'estornado_por', 'INTEGER'],
     ['cardapio', 'foto_versao', 'INTEGER'],
+    ['padroes', 'versao', 'INTEGER NOT NULL DEFAULT 1'],
     ['cardapio', 'ncm', 'TEXT'], ['cardapio', 'cfop', 'TEXT'], ['cardapio', 'csosn', 'TEXT'],
     ['cardapio', 'origem', 'TEXT'], ['cardapio', 'unidade', 'TEXT'],
     ['cardapio', 'fiscal_revisado', 'INTEGER NOT NULL DEFAULT 0'], ['cardapio', 'fiscal_extra', 'TEXT']
@@ -138,6 +141,8 @@ function confirmaPin(pin, sal, esperado) {
 }
 
 const agora = () => new Date().toISOString();
-const codigoMesa = () => crypto.randomBytes(4).toString('hex').toUpperCase();
+/* O código da conta é o que dá acesso a ela sem login. Com 32 bits, varrer
+   o espaço atrás das ~20 contas abertas levava dias; com 48, séculos. */
+const codigoMesa = () => crypto.randomBytes(6).toString('hex').toUpperCase();
 
 module.exports = { abrir, esquema, migrar, hashPin, confirmaPin, agora, codigoMesa, ARQUIVO };
